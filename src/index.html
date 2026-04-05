@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InstaLock</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>InstaLock</h1>
+      <div class="status">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Desconnectat</span>
+        <span class="mode-indicator" id="modeIndicator" hidden>
+          <span class="mode-label">Mode:</span>
+          <span id="modeName">—</span>
+        </span>
+      </div>
+    </header>
+
+    <main>
+      <div class="setting-row">
+        <label class="toggle">
+          <input type="checkbox" id="autoAccept">
+          <span class="slider"></span>
+        </label>
+        <span class="setting-label">Auto Accept</span>
+      </div>
+
+      <div class="setting-row pick-row">
+        <label class="toggle">
+          <input type="checkbox" id="autoPick">
+          <span class="slider"></span>
+        </label>
+        <span class="setting-label">Auto Pick</span>
+        <div class="champ-autocomplete">
+          <input type="text" id="pickChampion" placeholder="Champion..." class="champ-input" autocomplete="off">
+          <div class="champ-dropdown" id="pickDropdown"></div>
+        </div>
+        <label class="bravery-toggle">
+          <input type="checkbox" id="braveryEnabled">
+          <span>Bravery</span>
+        </label>
+      </div>
+
+      <div class="setting-row ban-row">
+        <label class="toggle">
+          <input type="checkbox" id="autoBan">
+          <span class="slider"></span>
+        </label>
+        <span class="setting-label">Auto Ban</span>
+        <div class="champ-autocomplete">
+          <input type="text" id="banChampion" placeholder="Champion..." class="champ-input" autocomplete="off">
+          <div class="champ-dropdown" id="banDropdown"></div>
+        </div>
+      </div>
+    </main>
+
+    <div class="log" id="log"></div>
+
+    <footer>
+      <label class="autostart-label">
+        <input type="checkbox" id="autoStart">
+        <span>Engegar amb Windows</span>
+      </label>
+      <label class="autostart-label">
+        <input type="checkbox" id="restoreFocus">
+        <span>Retornar focus després d'acceptar/pickar</span>
+      </label>
+    </footer>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
