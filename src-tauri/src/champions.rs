@@ -84,6 +84,10 @@ impl Champions {
     pub fn get_names(&self) -> Vec<String> {
         self.names.lock().unwrap().clone()
     }
+
+    pub fn get_id_to_name(&self) -> HashMap<i32, String> {
+        self.id_to_name.lock().unwrap().clone()
+    }
 }
 
 fn normalize(name: &str) -> String {

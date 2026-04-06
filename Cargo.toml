@@ -1,0 +1,3 @@
+[workspace]
+members = ["src-tauri", "instalock-server", "instalock-shared"]
+resolver = "2"

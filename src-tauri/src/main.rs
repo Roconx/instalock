@@ -5,14 +5,19 @@ mod actions;
 mod champions;
 mod focus;
 mod lcu;
+mod overlay;
 mod settings;
+mod sync;
 
 use champions::Champions;
 use lcu::{LcuEvent, LcuMonitor, QueueModeInfo};
+use overlay::OverlayState;
 use settings::{Settings, SettingsManager};
 use std::sync::Arc;
-use tauri::Emitter;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 struct AppState {
     settings_manager: SettingsManager,
@@ -20,6 +25,8 @@ struct AppState {
     lcu_monitor: LcuMonitor,
     last_action: tokio::sync::Mutex<String>,
     current_queue_mode: tokio::sync::Mutex<Option<QueueModeInfo>>,
+    overlay_state: Arc<OverlayState>,
+    sync_client: tokio::sync::Mutex<Option<Arc<sync::SyncClient>>>,
 }
 
 // Tauri commands called from the frontend
@@ -62,13 +69,82 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) {
     }
 }
 
+#[tauri::command]
+async fn get_overlay_data(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<overlay::EnemyData>, String> {
+    Ok(state.overlay_state.enemies.lock().await.clone())
+}
+
+#[tauri::command]
+async fn save_overlay_position(
+    state: tauri::State<'_, Arc<AppState>>,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let mut settings = state.settings_manager.get();
+    settings.overlay_x = Some(x);
+    settings.overlay_y = Some(y);
+    state.settings_manager.update(settings);
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_timer_event(
+    state: tauri::State<'_, Arc<AppState>>,
+    enemy_idx: u8,
+    spell_idx: u8,
+    cooldown_secs: u32,
+) -> Result<(), String> {
+    let started_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Broadcast to sync server if connected
+    let client = state.sync_client.lock().await;
+    if let Some(ref c) = *client {
+        let _ = c
+            .send(instalock_shared::SyncMessage::TimerStart {
+                enemy_idx,
+                spell_idx,
+                cooldown_secs,
+                started_at,
+            })
+            .await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn cancel_timer_event(
+    state: tauri::State<'_, Arc<AppState>>,
+    enemy_idx: u8,
+    spell_idx: u8,
+) -> Result<(), String> {
+    let client = state.sync_client.lock().await;
+    if let Some(ref c) = *client {
+        let _ = c
+            .send(instalock_shared::SyncMessage::TimerCancel {
+                enemy_idx,
+                spell_idx,
+            })
+            .await;
+    }
+    Ok(())
+}
+
 fn main() {
+    let overlay_state = Arc::new(OverlayState::new());
+
     let app_state = Arc::new(AppState {
         settings_manager: SettingsManager::new(),
         champions: Champions::new(),
         lcu_monitor: LcuMonitor::new(),
         last_action: tokio::sync::Mutex::new(String::new()),
         current_queue_mode: tokio::sync::Mutex::new(None),
+        overlay_state: overlay_state.clone(),
+        sync_client: tokio::sync::Mutex::new(None),
     });
 
     tauri::Builder::default()
@@ -76,6 +152,7 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--autostart"]),
         ))
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(app_state.clone())
         .invoke_handler(tauri::generate_handler![
             get_settings,
@@ -84,10 +161,31 @@ fn main() {
             is_lcu_connected,
             get_autostart,
             set_autostart,
+            get_overlay_data,
+            save_overlay_position,
+            send_timer_event,
+            cancel_timer_event,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
             let state = app_state.clone();
+
+            // Register global shortcut Alt+T for overlay toggle
+            let overlay_interactive = Arc::new(AtomicBool::new(false));
+            let alt_t = Shortcut::new(Some(Modifiers::ALT), Code::KeyT);
+            let oi = overlay_interactive.clone();
+            let ah_shortcut = app.handle().clone();
+            let _ = app.global_shortcut().on_shortcut(alt_t, move |_app, _shortcut, event| {
+                if let ShortcutState::Pressed = event.state {
+                    let interactive = !oi.load(Ordering::SeqCst);
+                    oi.store(interactive, Ordering::SeqCst);
+
+                    if let Some(overlay_win) = ah_shortcut.get_webview_window("overlay") {
+                        let _ = overlay_win.set_ignore_cursor_events(!interactive);
+                        let _ = ah_shortcut.emit("overlay-interactive", interactive);
+                    }
+                }
+            });
 
             // Spawn background tasks
             tauri::async_runtime::spawn(async move {
@@ -121,17 +219,22 @@ fn main() {
                             handle_ready_check(&state, &app_handle, &data).await;
                         }
                         LcuEvent::ChampSelect(data) => {
+                            // Extract enemy data for overlay
+                            let id_to_name = state.champions.get_id_to_name();
+                            let enemies = overlay::extract_enemies(&data, &id_to_name);
+                            if !enemies.is_empty() {
+                                *state.overlay_state.enemies.lock().await = enemies;
+                            }
+
                             handle_champ_select(&state, &app_handle, &data).await;
                         }
                         LcuEvent::GameflowPhase(phase) => {
-                            if phase != "ChampSelect" {
-                                // Reset dedup guard when leaving champ select
-                                *state.last_action.lock().await = String::new();
-                            }
+                            handle_gameflow_phase(&state, &app_handle, &phase).await;
                         }
                         LcuEvent::QueueMode(info) => {
                             *state.current_queue_mode.lock().await = info.clone();
-                            let _ = app_handle.emit("queue-mode", build_queue_mode_payload(&info));
+                            let _ =
+                                app_handle.emit("queue-mode", build_queue_mode_payload(&info));
                         }
                     }
                 }
@@ -141,6 +244,132 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+async fn handle_gameflow_phase(state: &Arc<AppState>, app_handle: &tauri::AppHandle, phase: &str) {
+    match phase {
+        "ChampSelect" => {
+            // Reset is handled by GameflowPhase != ChampSelect below
+        }
+        "InProgress" => {
+            let settings = state.settings_manager.get();
+            if settings.overlay_enabled {
+                // Create overlay window
+                if let Err(e) = create_overlay_window(app_handle, &settings) {
+                    log::error!("Failed to create overlay: {}", e);
+                    let _ = app_handle.emit("log", &format!("Error overlay: {}", e));
+                } else {
+                    let _ = app_handle.emit("log", "Overlay obert");
+
+                    // Send enemy data to overlay
+                    let enemies = state.overlay_state.enemies.lock().await.clone();
+                    let _ = app_handle.emit("overlay-data", &enemies);
+
+                    // Start polling for rune data
+                    let overlay_state = state.overlay_state.clone();
+                    let ah = app_handle.clone();
+                    tokio::spawn(async move {
+                        overlay::poll_live_client_runes(overlay_state.clone()).await;
+                        let enemies = overlay_state.enemies.lock().await.clone();
+                        let _ = ah.emit("overlay-data", &enemies);
+                    });
+                }
+
+                // Connect to sync server if enabled
+                if settings.sync_enabled && !settings.sync_server_url.is_empty() {
+                    let game_id = state
+                        .overlay_state
+                        .game_id
+                        .lock()
+                        .await
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string());
+
+                    match sync::SyncClient::connect(
+                        &settings.sync_server_url,
+                        &game_id,
+                        "player",
+                    )
+                    .await
+                    {
+                        Ok(client) => {
+                            // Forward incoming sync messages to the overlay
+                            let mut rx = client.incoming_tx.subscribe();
+                            let ah = app_handle.clone();
+                            tokio::spawn(async move {
+                                while let Ok(msg) = rx.recv().await {
+                                    let _ = ah.emit("sync-message", &msg);
+                                }
+                            });
+
+                            *state.sync_client.lock().await = Some(client);
+                            let _ = app_handle.emit("log", "Sync connectat");
+                        }
+                        Err(e) => {
+                            log::error!("Sync connect failed: {}", e);
+                            let _ =
+                                app_handle.emit("log", &format!("Sync error: {}", e));
+                        }
+                    }
+                }
+            }
+        }
+        "EndOfGame" | "Lobby" | "None" | "WaitingForStats" => {
+            // Destroy overlay window
+            if let Some(overlay_win) = app_handle.get_webview_window("overlay") {
+                let _ = overlay_win.close();
+                let _ = app_handle.emit("log", "Overlay tancat");
+            }
+
+            // Disconnect sync
+            *state.sync_client.lock().await = None;
+
+            // Clear overlay state
+            *state.overlay_state.enemies.lock().await = Vec::new();
+            *state.overlay_state.game_id.lock().await = None;
+        }
+        _ => {}
+    }
+
+    if phase != "ChampSelect" {
+        // Reset dedup guard when leaving champ select
+        *state.last_action.lock().await = String::new();
+    }
+}
+
+fn create_overlay_window(
+    app_handle: &tauri::AppHandle,
+    settings: &Settings,
+) -> Result<(), String> {
+    // Don't create if already exists
+    if app_handle.get_webview_window("overlay").is_some() {
+        return Ok(());
+    }
+
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        app_handle,
+        "overlay",
+        tauri::WebviewUrl::App("overlay.html".into()),
+    )
+    .title("InstaLock Overlay")
+    .inner_size(300.0, 340.0)
+    .transparent(true)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .focused(false);
+
+    if let (Some(x), Some(y)) = (settings.overlay_x, settings.overlay_y) {
+        builder = builder.position(x, y);
+    } else {
+        builder = builder.center();
+    }
+
+    let window = builder.build().map_err(|e| e.to_string())?;
+    let _ = window.set_ignore_cursor_events(true);
+
+    Ok(())
 }
 
 /// Spawn a background task that waits for LoL to grab focus and then forces
@@ -212,22 +441,17 @@ async fn handle_champ_select(
     };
 
     // Check the timer - only act when there's an active countdown
-    // This prevents acting during PLANNING phase or before the phase truly starts
     let timer_left = session["timer"]["adjustedTimeLeftInPhase"]
         .as_f64()
         .unwrap_or(0.0);
-    let timer_phase = session["timer"]["phase"]
-        .as_str()
-        .unwrap_or("");
+    let timer_phase = session["timer"]["phase"].as_str().unwrap_or("");
 
     // Skip if we're in planning phase or timer hasn't started
     if timer_phase == "PLANNING" || timer_phase == "GAME_STARTING" || timer_left <= 0.0 {
         return;
     }
 
-    // Resolve the current game mode: prefer the lobby-derived value, fall back
-    // to the session's own queueId mapping so we still act correctly if the app
-    // started mid-champ-select and never saw a lobby event.
+    // Resolve the current game mode
     let mode: Option<String> = {
         let current = state.current_queue_mode.lock().await;
         current
@@ -240,7 +464,7 @@ async fn handle_champ_select(
             })
     };
 
-    // ARAM has no human pick or ban phase — skip entirely regardless of settings.
+    // ARAM has no human pick or ban phase
     if mode.as_deref() == Some("ARAM") {
         return;
     }
@@ -250,8 +474,7 @@ async fn handle_champ_select(
         None => return,
     };
 
-    // Find my current action, capturing both type and action id so the Bravery
-    // path can PATCH the action directly without a second find_my_action round-trip.
+    // Find my current action
     let mut my_action: Option<(&str, i64)> = None;
     if let Some(actions) = session["actions"].as_array() {
         for group in actions {
@@ -287,14 +510,12 @@ async fn handle_champ_select(
         *last = dedup_key;
     }
 
-    // Arena (CHERRY) has no human ban phase — the system pre-completes all bans.
-    // Skip the ban branch to avoid spurious PATCH attempts.
+    // Arena (CHERRY) has no human ban phase
     if action_type == "ban" && mode.as_deref() == Some("CHERRY") {
         return;
     }
 
-    // Capture focus before any action so we can restore it after the LCU PATCH
-    // (LoL client often grabs focus on ban/pick just like on ready check).
+    // Capture focus before any action
     let captured_hwnd = if settings.restore_focus_after_action {
         focus::capture_foreground()
     } else {
@@ -303,7 +524,10 @@ async fn handle_champ_select(
 
     match action_type {
         "ban" if settings.auto_ban && !settings.ban_champion.is_empty() => {
-            let delay = settings.ban_delay_secs.min(timer_left - settings.action_margin_secs).max(0.0);
+            let delay = settings
+                .ban_delay_secs
+                .min(timer_left - settings.action_margin_secs)
+                .max(0.0);
             if delay > 0.0 {
                 tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
             }
@@ -315,18 +539,27 @@ async fn handle_champ_select(
                         spawn_focus_restore(captured_hwnd);
                     }
                     Err(e) => {
-                        let _ =
-                            app_handle.emit("log", &format!("Error banning: {}", e));
+                        let _ = app_handle.emit("log", &format!("Error banning: {}", e));
                         *state.last_action.lock().await = String::new();
                     }
                 }
             } else {
-                let _ = app_handle.emit("log", &format!("Champion '{}' no trobat per ban", settings.ban_champion));
+                let _ = app_handle.emit(
+                    "log",
+                    &format!("Champion '{}' no trobat per ban", settings.ban_champion),
+                );
                 *state.last_action.lock().await = String::new();
             }
         }
-        "pick" if settings.auto_pick && mode.as_deref() == Some("CHERRY") && settings.bravery_enabled => {
-            let delay = settings.pick_delay_secs.min(timer_left - settings.action_margin_secs).max(0.0);
+        "pick"
+            if settings.auto_pick
+                && mode.as_deref() == Some("CHERRY")
+                && settings.bravery_enabled =>
+        {
+            let delay = settings
+                .pick_delay_secs
+                .min(timer_left - settings.action_margin_secs)
+                .max(0.0);
             if delay > 0.0 {
                 tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
             }
@@ -342,7 +575,10 @@ async fn handle_champ_select(
             }
         }
         "pick" if settings.auto_pick && !settings.pick_champion.is_empty() => {
-            let delay = settings.pick_delay_secs.min(timer_left - settings.action_margin_secs).max(0.0);
+            let delay = settings
+                .pick_delay_secs
+                .min(timer_left - settings.action_margin_secs)
+                .max(0.0);
             if delay > 0.0 {
                 tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
             }
@@ -354,13 +590,15 @@ async fn handle_champ_select(
                         spawn_focus_restore(captured_hwnd);
                     }
                     Err(e) => {
-                        let _ =
-                            app_handle.emit("log", &format!("Error picking: {}", e));
+                        let _ = app_handle.emit("log", &format!("Error picking: {}", e));
                         *state.last_action.lock().await = String::new();
                     }
                 }
             } else {
-                let _ = app_handle.emit("log", &format!("Champion '{}' no trobat per pick", settings.pick_champion));
+                let _ = app_handle.emit(
+                    "log",
+                    &format!("Champion '{}' no trobat per pick", settings.pick_champion),
+                );
                 *state.last_action.lock().await = String::new();
             }
         }

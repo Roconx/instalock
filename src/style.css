@@ -348,6 +348,17 @@ body[data-queue-mode="CHERRY"] .bravery-toggle {
   display: inline-flex;
 }
 
+/* Bravery checkbox disabled state */
+.bravery-toggle input:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.bravery-toggle:has(input:disabled) {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 /* ── ARAM: hide pick/ban ── */
 
 body[data-queue-mode="ARAM"] .pick-row,
@@ -440,10 +451,25 @@ body[data-queue-mode="ARAM"] .ban-row {
   opacity: 0.6;
 }
 
+.settings-section {
+  margin-bottom: 16px;
+}
+
+.settings-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #7a7a96;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0 4px 6px;
+}
+
 .settings-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .settings-item {
@@ -454,18 +480,8 @@ body[data-queue-mode="ARAM"] .ban-row {
   background: #141428;
   cursor: pointer;
   transition: background 0.15s;
-}
-
-.settings-item:first-child {
-  border-radius: 10px 10px 0 0;
-}
-
-.settings-item:last-child {
-  border-radius: 0 0 10px 10px;
-}
-
-.settings-item:only-child {
-  border-radius: 10px;
+  gap: 12px;
+  min-width: 0;
 }
 
 .settings-item:hover {
@@ -475,21 +491,47 @@ body[data-queue-mode="ARAM"] .ban-row {
 .settings-item-label {
   font-size: 13px;
   color: #c8c8d4;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .settings-item input[type="checkbox"] {
   accent-color: #5865f2;
   width: 15px;
   height: 15px;
+  flex-shrink: 0;
 }
 
-.margin-control {
+.slider-control {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 140px;
+  width: 120px;
+  flex-shrink: 0;
 }
 
-.margin-control .delay-slider {
+.slider-control .delay-slider {
   flex: 1;
+}
+
+/* ── Settings text input ── */
+
+.settings-text-input {
+  background: #0e0e1a;
+  border: 1px solid #1e1e38;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #e8e8f0;
+  font-size: 12px;
+  outline: none;
+  width: 180px;
+  transition: border-color 0.15s;
+}
+
+.settings-text-input:focus {
+  border-color: #5865f2;
+}
+
+.settings-text-input::placeholder {
+  color: #44445a;
 }

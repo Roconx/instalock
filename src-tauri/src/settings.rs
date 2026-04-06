@@ -23,6 +23,20 @@ pub struct Settings {
     pub ban_delay_secs: f64,
     #[serde(default = "default_margin")]
     pub action_margin_secs: f64,
+    // Overlay settings
+    #[serde(default = "default_true")]
+    pub overlay_enabled: bool,
+    #[serde(default = "default_opacity")]
+    pub overlay_opacity: f64,
+    #[serde(default)]
+    pub overlay_x: Option<f64>,
+    #[serde(default)]
+    pub overlay_y: Option<f64>,
+    // Sync settings
+    #[serde(default)]
+    pub sync_enabled: bool,
+    #[serde(default = "default_server_url")]
+    pub sync_server_url: String,
 }
 
 fn default_true() -> bool {
@@ -31,6 +45,14 @@ fn default_true() -> bool {
 
 fn default_margin() -> f64 {
     1.5
+}
+
+fn default_opacity() -> f64 {
+    0.8
+}
+
+fn default_server_url() -> String {
+    "ws://localhost:9876".to_string()
 }
 
 impl Default for Settings {
@@ -47,6 +69,12 @@ impl Default for Settings {
             pick_delay_secs: 0.0,
             ban_delay_secs: 0.0,
             action_margin_secs: 1.5,
+            overlay_enabled: true,
+            overlay_opacity: 0.8,
+            overlay_x: None,
+            overlay_y: None,
+            sync_enabled: false,
+            sync_server_url: default_server_url(),
         }
     }
 }

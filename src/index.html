@@ -40,13 +40,6 @@
               <span class="slider"></span>
             </label>
           </div>
-          <div class="card-body" data-toggle="autoAccept">
-            <div class="delay-row">
-              <span class="delay-label">Delay</span>
-              <input type="range" class="delay-slider" id="acceptDelay" min="0" max="10" step="0.5" value="0">
-              <span class="delay-value" id="acceptDelayValue">0s</span>
-            </div>
-          </div>
         </section>
 
         <section class="card pick-row">
@@ -68,11 +61,6 @@
               <input type="text" id="pickChampion" placeholder="Champion..." class="champ-input" autocomplete="off">
               <div class="champ-dropdown" id="pickDropdown"></div>
             </div>
-            <div class="delay-row">
-              <span class="delay-label">Delay</span>
-              <input type="range" class="delay-slider" id="pickDelay" min="0" max="28" step="0.5" value="0">
-              <span class="delay-value" id="pickDelayValue">0s</span>
-            </div>
           </div>
         </section>
 
@@ -88,11 +76,6 @@
             <div class="champ-autocomplete">
               <input type="text" id="banChampion" placeholder="Champion..." class="champ-input" autocomplete="off">
               <div class="champ-dropdown" id="banDropdown"></div>
-            </div>
-            <div class="delay-row">
-              <span class="delay-label">Delay</span>
-              <input type="range" class="delay-slider" id="banDelay" min="0" max="28" step="0.5" value="0">
-              <span class="delay-value" id="banDelayValue">0s</span>
             </div>
           </div>
         </section>
@@ -110,22 +93,82 @@
         <span>Configuració</span>
       </div>
 
-      <div class="settings-list">
-        <label class="settings-item">
-          <span class="settings-item-label">Engegar amb el sistema</span>
-          <input type="checkbox" id="autoStart">
-        </label>
+      <div class="settings-section">
+        <div class="settings-section-title">General</div>
+        <div class="settings-list">
+          <label class="settings-item">
+            <span class="settings-item-label">Engegar amb el sistema</span>
+            <input type="checkbox" id="autoStart">
+          </label>
+          <label class="settings-item">
+            <span class="settings-item-label">Retornar focus després d'acció</span>
+            <input type="checkbox" id="restoreFocus">
+          </label>
+        </div>
+      </div>
 
-        <label class="settings-item">
-          <span class="settings-item-label">Retornar focus després d'acció</span>
-          <input type="checkbox" id="restoreFocus">
-        </label>
+      <div class="settings-section">
+        <div class="settings-section-title">Delays</div>
+        <div class="settings-list">
+          <div class="settings-item">
+            <span class="settings-item-label">Acceptar partida</span>
+            <div class="slider-control">
+              <input type="range" class="delay-slider" id="acceptDelay" min="0" max="10" step="0.5" value="0">
+              <span class="delay-value" id="acceptDelayValue">0s</span>
+            </div>
+          </div>
+          <div class="settings-item">
+            <span class="settings-item-label">Pickejar champion</span>
+            <div class="slider-control">
+              <input type="range" class="delay-slider" id="pickDelay" min="0" max="28" step="0.5" value="0">
+              <span class="delay-value" id="pickDelayValue">0s</span>
+            </div>
+          </div>
+          <div class="settings-item">
+            <span class="settings-item-label">Bannejar champion</span>
+            <div class="slider-control">
+              <input type="range" class="delay-slider" id="banDelay" min="0" max="28" step="0.5" value="0">
+              <span class="delay-value" id="banDelayValue">0s</span>
+            </div>
+          </div>
+          <div class="settings-item">
+            <span class="settings-item-label">Temps mínim abans que expiri el timer</span>
+            <div class="slider-control">
+              <input type="range" class="delay-slider" id="actionMargin" min="0.5" max="5" step="0.5" value="1.5">
+              <span class="delay-value" id="actionMarginValue">1.5s</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-        <div class="settings-item">
-          <span class="settings-item-label">Marge de seguretat</span>
-          <div class="margin-control">
-            <input type="range" class="delay-slider" id="actionMargin" min="0.5" max="5" step="0.5" value="1.5">
-            <span class="delay-value" id="actionMarginValue">1.5s</span>
+      <div class="settings-section">
+        <div class="settings-section-title">Overlay</div>
+        <div class="settings-list">
+          <label class="settings-item">
+            <span class="settings-item-label">Overlay de summoners in-game</span>
+            <input type="checkbox" id="overlayEnabled">
+          </label>
+          <div class="settings-item">
+            <span class="settings-item-label">Opacitat</span>
+            <div class="slider-control">
+              <input type="range" class="delay-slider" id="overlayOpacity" min="0.3" max="1" step="0.05" value="0.8">
+              <span class="delay-value" id="overlayOpacityValue">0.8</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">Sync</div>
+        <div class="settings-list">
+          <label class="settings-item">
+            <span class="settings-item-label">Sincronitzar timers amb teammates</span>
+            <input type="checkbox" id="syncEnabled">
+          </label>
+          <div class="settings-item">
+            <span class="settings-item-label">Servidor</span>
+            <input type="text" id="syncServerUrl" class="settings-text-input" placeholder="ws://192.168.1.x:9876" autocomplete="off">
           </div>
         </div>
       </div>

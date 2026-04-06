@@ -3,6 +3,7 @@ node_modules/
 npm-debug.log*
 
 # Rust / Tauri
+target/
 src-tauri/target/
 src-tauri/gen/schemas/
 

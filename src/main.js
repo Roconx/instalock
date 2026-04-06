@@ -124,7 +124,7 @@ function setupAutocomplete(input, dropdown) {
   });
 }
 
-// Toggle card-body disabled state
+// Toggle card-body disabled state + bravery exclusivity
 function updateCardBodyStates() {
   document.querySelectorAll(".card-body[data-toggle]").forEach((body) => {
     const toggleId = body.dataset.toggle;
@@ -133,6 +133,13 @@ function updateCardBodyStates() {
       body.classList.toggle("disabled", !checkbox.checked);
     }
   });
+  // Bravery disabled when auto pick is OFF
+  braveryEnabled.disabled = !autoPick.checked;
+  // Hide champion input entirely when bravery active (keeps card height consistent)
+  const pickBody = document.querySelector('.card-body[data-toggle="autoPick"]');
+  if (pickBody) {
+    pickBody.hidden = braveryEnabled.checked && autoPick.checked;
+  }
 }
 
 // Settings view toggle
@@ -179,6 +186,15 @@ async function init() {
   setupAutocomplete(pickChampion, pickDropdown);
   setupAutocomplete(banChampion, banDropdown);
 
+  // Typing a champion disables bravery
+  pickChampion.addEventListener("input", () => {
+    if (pickChampion.value.trim() && braveryEnabled.checked) {
+      braveryEnabled.checked = false;
+      updateCardBodyStates();
+      saveSettingsDebounced();
+    }
+  });
+
   // Load champions with retry
   await loadChampionsWithRetry();
 
@@ -195,7 +211,13 @@ async function init() {
     updateCardBodyStates();
     saveSettingsDebounced();
   });
-  braveryEnabled.addEventListener("change", () => saveSettingsDebounced());
+  braveryEnabled.addEventListener("change", () => {
+    if (braveryEnabled.checked) {
+      pickChampion.value = "";
+    }
+    updateCardBodyStates();
+    saveSettingsDebounced();
+  });
 
   // Save champion inputs on blur
   pickChampion.addEventListener("blur", () => saveSettingsDebounced());
@@ -213,6 +235,24 @@ async function init() {
       saveSettingsDebounced();
     });
   });
+
+  // Overlay settings listeners
+  const overlayEnabled = document.getElementById("overlayEnabled");
+  if (overlayEnabled) overlayEnabled.addEventListener("change", () => saveSettingsDebounced());
+  const overlayOpacity = document.getElementById("overlayOpacity");
+  const overlayOpacityValue = document.getElementById("overlayOpacityValue");
+  if (overlayOpacity) {
+    overlayOpacity.addEventListener("input", () => {
+      overlayOpacityValue.textContent = parseFloat(overlayOpacity.value).toFixed(2);
+      saveSettingsDebounced();
+    });
+  }
+
+  // Sync settings listeners
+  const syncEnabled = document.getElementById("syncEnabled");
+  if (syncEnabled) syncEnabled.addEventListener("change", () => saveSettingsDebounced());
+  const syncServerUrl = document.getElementById("syncServerUrl");
+  if (syncServerUrl) syncServerUrl.addEventListener("blur", () => saveSettingsDebounced());
 
   // Settings view
   settingsBtn.addEventListener("click", toggleSettingsView);
@@ -245,6 +285,22 @@ function applySettings(s) {
   actionMargin.value = s.actionMarginSecs ?? 1.5;
   actionMarginValue.textContent = formatDelay(actionMargin.value);
 
+  // Overlay settings
+  const overlayEnabled = document.getElementById("overlayEnabled");
+  if (overlayEnabled) overlayEnabled.checked = s.overlayEnabled !== false;
+  const overlayOpacity = document.getElementById("overlayOpacity");
+  const overlayOpacityValue = document.getElementById("overlayOpacityValue");
+  if (overlayOpacity) {
+    overlayOpacity.value = s.overlayOpacity ?? 0.8;
+    overlayOpacityValue.textContent = parseFloat(overlayOpacity.value).toFixed(2);
+  }
+
+  // Sync settings
+  const syncEnabled = document.getElementById("syncEnabled");
+  if (syncEnabled) syncEnabled.checked = s.syncEnabled || false;
+  const syncServerUrl = document.getElementById("syncServerUrl");
+  if (syncServerUrl) syncServerUrl.value = s.syncServerUrl || "";
+
   updateCardBodyStates();
 }
 
@@ -262,6 +318,10 @@ function collectSettings() {
     pickDelaySecs: parseFloat(pickDelay.value) || 0,
     banDelaySecs: parseFloat(banDelay.value) || 0,
     actionMarginSecs: parseFloat(actionMargin.value) || 1.5,
+    overlayEnabled: document.getElementById("overlayEnabled")?.checked ?? true,
+    overlayOpacity: parseFloat(document.getElementById("overlayOpacity")?.value) || 0.8,
+    syncEnabled: document.getElementById("syncEnabled")?.checked || false,
+    syncServerUrl: document.getElementById("syncServerUrl")?.value?.trim() || "ws://localhost:9876",
   };
 }
 
