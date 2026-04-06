@@ -170,6 +170,15 @@ async fn handle_ready_check(
     let no_response = data["playerResponse"].as_str() == Some("None");
 
     if is_in_progress && no_response {
+        // Delay before accepting (capped so we always act before timer expires)
+        let accept_delay = settings
+            .accept_delay_secs
+            .min(12.0 - settings.action_margin_secs)
+            .max(0.0);
+        if accept_delay > 0.0 {
+            tokio::time::sleep(std::time::Duration::from_secs_f64(accept_delay)).await;
+        }
+
         // Capture the user's current foreground window BEFORE accepting so we
         // can restore it after LoL inevitably steals focus on the ready check.
         let captured_hwnd = if settings.restore_focus_after_action {
@@ -294,8 +303,12 @@ async fn handle_champ_select(
 
     match action_type {
         "ban" if settings.auto_ban && !settings.ban_champion.is_empty() => {
+            let delay = settings.ban_delay_secs.min(timer_left - settings.action_margin_secs).max(0.0);
+            if delay > 0.0 {
+                tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+            }
             if let Some(champ_id) = state.champions.resolve_id(&settings.ban_champion) {
-                match actions::ban_champion(&creds, champ_id).await {
+                match actions::ban_champion(&creds, action_id, champ_id).await {
                     Ok(_) => {
                         let _ = app_handle
                             .emit("log", &format!("Banned {}!", settings.ban_champion));
@@ -304,13 +317,19 @@ async fn handle_champ_select(
                     Err(e) => {
                         let _ =
                             app_handle.emit("log", &format!("Error banning: {}", e));
-                        // Reset dedup so it can retry
                         *state.last_action.lock().await = String::new();
                     }
                 }
+            } else {
+                let _ = app_handle.emit("log", &format!("Champion '{}' no trobat per ban", settings.ban_champion));
+                *state.last_action.lock().await = String::new();
             }
         }
-        "pick" if mode.as_deref() == Some("CHERRY") && settings.bravery_enabled => {
+        "pick" if settings.auto_pick && mode.as_deref() == Some("CHERRY") && settings.bravery_enabled => {
+            let delay = settings.pick_delay_secs.min(timer_left - settings.action_margin_secs).max(0.0);
+            if delay > 0.0 {
+                tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+            }
             match actions::pick_bravery(&creds, action_id).await {
                 Ok(_) => {
                     let _ = app_handle.emit("log", "Bravery activada!");
@@ -323,8 +342,12 @@ async fn handle_champ_select(
             }
         }
         "pick" if settings.auto_pick && !settings.pick_champion.is_empty() => {
+            let delay = settings.pick_delay_secs.min(timer_left - settings.action_margin_secs).max(0.0);
+            if delay > 0.0 {
+                tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+            }
             if let Some(champ_id) = state.champions.resolve_id(&settings.pick_champion) {
-                match actions::pick_champion(&creds, champ_id).await {
+                match actions::pick_champion(&creds, action_id, champ_id).await {
                     Ok(_) => {
                         let _ = app_handle
                             .emit("log", &format!("Picked {}!", settings.pick_champion));
@@ -336,6 +359,9 @@ async fn handle_champ_select(
                         *state.last_action.lock().await = String::new();
                     }
                 }
+            } else {
+                let _ = app_handle.emit("log", &format!("Champion '{}' no trobat per pick", settings.pick_champion));
+                *state.last_action.lock().await = String::new();
             }
         }
         _ => {

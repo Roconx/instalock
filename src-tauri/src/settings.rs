@@ -15,10 +15,22 @@ pub struct Settings {
     pub bravery_enabled: bool,
     #[serde(default = "default_true")]
     pub restore_focus_after_action: bool,
+    #[serde(default)]
+    pub accept_delay_secs: f64,
+    #[serde(default)]
+    pub pick_delay_secs: f64,
+    #[serde(default)]
+    pub ban_delay_secs: f64,
+    #[serde(default = "default_margin")]
+    pub action_margin_secs: f64,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_margin() -> f64 {
+    1.5
 }
 
 impl Default for Settings {
@@ -31,6 +43,10 @@ impl Default for Settings {
             ban_champion: String::new(),
             bravery_enabled: false,
             restore_focus_after_action: true,
+            accept_delay_secs: 0.0,
+            pick_delay_secs: 0.0,
+            ban_delay_secs: 0.0,
+            action_margin_secs: 1.5,
         }
     }
 }

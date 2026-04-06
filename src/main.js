@@ -16,6 +16,22 @@ const pickDropdown = document.getElementById("pickDropdown");
 const banDropdown = document.getElementById("banDropdown");
 const logEl = document.getElementById("log");
 
+// Delay elements
+const acceptDelay = document.getElementById("acceptDelay");
+const pickDelay = document.getElementById("pickDelay");
+const banDelay = document.getElementById("banDelay");
+const acceptDelayValue = document.getElementById("acceptDelayValue");
+const pickDelayValue = document.getElementById("pickDelayValue");
+const banDelayValue = document.getElementById("banDelayValue");
+const actionMargin = document.getElementById("actionMargin");
+const actionMarginValue = document.getElementById("actionMarginValue");
+
+// Views
+const mainView = document.getElementById("mainView");
+const settingsView = document.getElementById("settingsView");
+const settingsBtn = document.getElementById("settingsBtn");
+const settingsBack = document.getElementById("settingsBack");
+
 // State
 let championNames = [];
 let saveTimeout = null;
@@ -29,6 +45,12 @@ function fuzzyMatch(champions, query) {
   if (!query) return [];
   const q = normalize(query);
   return champions.filter((name) => normalize(name).includes(q)).slice(0, 8);
+}
+
+// Format delay value
+function formatDelay(val) {
+  const n = parseFloat(val);
+  return n % 1 === 0 ? n + "s" : n.toFixed(1) + "s";
 }
 
 // Autocomplete setup
@@ -68,7 +90,6 @@ function setupAutocomplete(input, dropdown) {
   });
 
   input.addEventListener("blur", () => {
-    // Small delay so mousedown on option fires first
     setTimeout(() => dropdown.classList.remove("open"), 150);
   });
 
@@ -84,7 +105,6 @@ function setupAutocomplete(input, dropdown) {
       activeIdx = Math.max(activeIdx - 1, 0);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      // If one is highlighted use that, otherwise auto-select if only one match
       const pick = activeIdx >= 0 ? options[activeIdx] : (options.length === 1 ? options[0] : null);
       if (pick) {
         input.value = pick.textContent;
@@ -102,6 +122,31 @@ function setupAutocomplete(input, dropdown) {
     options.forEach((o, i) => o.classList.toggle("active", i === activeIdx));
     if (activeIdx >= 0) options[activeIdx].scrollIntoView({ block: "nearest" });
   });
+}
+
+// Toggle card-body disabled state
+function updateCardBodyStates() {
+  document.querySelectorAll(".card-body[data-toggle]").forEach((body) => {
+    const toggleId = body.dataset.toggle;
+    const checkbox = document.getElementById(toggleId);
+    if (checkbox) {
+      body.classList.toggle("disabled", !checkbox.checked);
+    }
+  });
+}
+
+// Settings view toggle
+function toggleSettingsView() {
+  const isSettings = !settingsView.classList.contains("hidden");
+  if (isSettings) {
+    settingsView.classList.add("hidden");
+    mainView.classList.remove("hidden");
+    settingsBtn.classList.remove("active");
+  } else {
+    mainView.classList.add("hidden");
+    settingsView.classList.remove("hidden");
+    settingsBtn.classList.add("active");
+  }
 }
 
 // Initialize
@@ -138,14 +183,43 @@ async function init() {
   await loadChampionsWithRetry();
 
   // Toggle listeners
-  autoAccept.addEventListener("change", () => saveSettingsDebounced());
-  autoPick.addEventListener("change", () => saveSettingsDebounced());
-  autoBan.addEventListener("change", () => saveSettingsDebounced());
+  autoAccept.addEventListener("change", () => {
+    updateCardBodyStates();
+    saveSettingsDebounced();
+  });
+  autoPick.addEventListener("change", () => {
+    updateCardBodyStates();
+    saveSettingsDebounced();
+  });
+  autoBan.addEventListener("change", () => {
+    updateCardBodyStates();
+    saveSettingsDebounced();
+  });
   braveryEnabled.addEventListener("change", () => saveSettingsDebounced());
 
-  // Save champion inputs on blur/enter (covers manual typing without dropdown)
+  // Save champion inputs on blur
   pickChampion.addEventListener("blur", () => saveSettingsDebounced());
   banChampion.addEventListener("blur", () => saveSettingsDebounced());
+
+  // Delay slider listeners
+  [
+    [acceptDelay, acceptDelayValue],
+    [pickDelay, pickDelayValue],
+    [banDelay, banDelayValue],
+    [actionMargin, actionMarginValue],
+  ].forEach(([slider, label]) => {
+    slider.addEventListener("input", () => {
+      label.textContent = formatDelay(slider.value);
+      saveSettingsDebounced();
+    });
+  });
+
+  // Settings view
+  settingsBtn.addEventListener("click", toggleSettingsView);
+  settingsBack.addEventListener("click", toggleSettingsView);
+
+  // Initial card body states
+  updateCardBodyStates();
 }
 
 function applySettings(s) {
@@ -155,10 +229,23 @@ function applySettings(s) {
   braveryEnabled.checked = s.braveryEnabled;
   pickChampion.value = s.pickChampion || "";
   banChampion.value = s.banChampion || "";
+
   const restoreFocusEl = document.getElementById("restoreFocus");
   if (restoreFocusEl) {
     restoreFocusEl.checked = s.restoreFocusAfterAction !== false;
   }
+
+  // Delays
+  acceptDelay.value = s.acceptDelaySecs || 0;
+  acceptDelayValue.textContent = formatDelay(acceptDelay.value);
+  pickDelay.value = s.pickDelaySecs || 0;
+  pickDelayValue.textContent = formatDelay(pickDelay.value);
+  banDelay.value = s.banDelaySecs || 0;
+  banDelayValue.textContent = formatDelay(banDelay.value);
+  actionMargin.value = s.actionMarginSecs ?? 1.5;
+  actionMarginValue.textContent = formatDelay(actionMargin.value);
+
+  updateCardBodyStates();
 }
 
 function collectSettings() {
@@ -171,6 +258,10 @@ function collectSettings() {
     pickChampion: pickChampion.value.trim(),
     banChampion: banChampion.value.trim(),
     restoreFocusAfterAction: restoreFocusEl ? restoreFocusEl.checked : true,
+    acceptDelaySecs: parseFloat(acceptDelay.value) || 0,
+    pickDelaySecs: parseFloat(pickDelay.value) || 0,
+    banDelaySecs: parseFloat(banDelay.value) || 0,
+    actionMarginSecs: parseFloat(actionMargin.value) || 1.5,
   };
 }
 

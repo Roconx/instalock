@@ -9,67 +9,127 @@
 <body>
   <div class="app">
     <header>
-      <h1>InstaLock</h1>
-      <div class="status">
-        <span class="dot" id="statusDot"></span>
-        <span id="statusText">Desconnectat</span>
+      <div class="header-left">
+        <h1>InstaLock</h1>
         <span class="mode-indicator" id="modeIndicator" hidden>
-          <span class="mode-label">Mode:</span>
           <span id="modeName">—</span>
         </span>
       </div>
+      <div class="header-right">
+        <span class="status">
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">Desconnectat</span>
+        </span>
+        <button class="settings-btn" id="settingsBtn" title="Configuració">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/>
+            <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.434-.901 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.421 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.421-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.377l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.116l.094-.318z"/>
+          </svg>
+        </button>
+      </div>
     </header>
 
-    <main>
-      <div class="setting-row">
-        <label class="toggle">
-          <input type="checkbox" id="autoAccept">
-          <span class="slider"></span>
-        </label>
-        <span class="setting-label">Auto Accept</span>
+    <!-- Main view -->
+    <div id="mainView">
+      <main>
+        <section class="card">
+          <div class="card-header">
+            <span class="card-title">Auto Accept</span>
+            <label class="toggle">
+              <input type="checkbox" id="autoAccept">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="card-body" data-toggle="autoAccept">
+            <div class="delay-row">
+              <span class="delay-label">Delay</span>
+              <input type="range" class="delay-slider" id="acceptDelay" min="0" max="10" step="0.5" value="0">
+              <span class="delay-value" id="acceptDelayValue">0s</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="card pick-row">
+          <div class="card-header">
+            <span class="card-title">Auto Pick</span>
+            <div class="card-header-right">
+              <label class="bravery-toggle">
+                <input type="checkbox" id="braveryEnabled">
+                <span>Bravery</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="autoPick">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+          <div class="card-body" data-toggle="autoPick">
+            <div class="champ-autocomplete">
+              <input type="text" id="pickChampion" placeholder="Champion..." class="champ-input" autocomplete="off">
+              <div class="champ-dropdown" id="pickDropdown"></div>
+            </div>
+            <div class="delay-row">
+              <span class="delay-label">Delay</span>
+              <input type="range" class="delay-slider" id="pickDelay" min="0" max="28" step="0.5" value="0">
+              <span class="delay-value" id="pickDelayValue">0s</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="card ban-row">
+          <div class="card-header">
+            <span class="card-title">Auto Ban</span>
+            <label class="toggle">
+              <input type="checkbox" id="autoBan">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="card-body" data-toggle="autoBan">
+            <div class="champ-autocomplete">
+              <input type="text" id="banChampion" placeholder="Champion..." class="champ-input" autocomplete="off">
+              <div class="champ-dropdown" id="banDropdown"></div>
+            </div>
+            <div class="delay-row">
+              <span class="delay-label">Delay</span>
+              <input type="range" class="delay-slider" id="banDelay" min="0" max="28" step="0.5" value="0">
+              <span class="delay-value" id="banDelayValue">0s</span>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div class="log" id="log"></div>
+    </div>
+
+    <!-- Settings view -->
+    <div id="settingsView" class="hidden">
+      <div class="settings-back" id="settingsBack">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
+        </svg>
+        <span>Configuració</span>
       </div>
 
-      <div class="setting-row pick-row">
-        <label class="toggle">
-          <input type="checkbox" id="autoPick">
-          <span class="slider"></span>
+      <div class="settings-list">
+        <label class="settings-item">
+          <span class="settings-item-label">Engegar amb el sistema</span>
+          <input type="checkbox" id="autoStart">
         </label>
-        <span class="setting-label">Auto Pick</span>
-        <div class="champ-autocomplete">
-          <input type="text" id="pickChampion" placeholder="Champion..." class="champ-input" autocomplete="off">
-          <div class="champ-dropdown" id="pickDropdown"></div>
+
+        <label class="settings-item">
+          <span class="settings-item-label">Retornar focus després d'acció</span>
+          <input type="checkbox" id="restoreFocus">
+        </label>
+
+        <div class="settings-item">
+          <span class="settings-item-label">Marge de seguretat</span>
+          <div class="margin-control">
+            <input type="range" class="delay-slider" id="actionMargin" min="0.5" max="5" step="0.5" value="1.5">
+            <span class="delay-value" id="actionMarginValue">1.5s</span>
+          </div>
         </div>
-        <label class="bravery-toggle">
-          <input type="checkbox" id="braveryEnabled">
-          <span>Bravery</span>
-        </label>
       </div>
-
-      <div class="setting-row ban-row">
-        <label class="toggle">
-          <input type="checkbox" id="autoBan">
-          <span class="slider"></span>
-        </label>
-        <span class="setting-label">Auto Ban</span>
-        <div class="champ-autocomplete">
-          <input type="text" id="banChampion" placeholder="Champion..." class="champ-input" autocomplete="off">
-          <div class="champ-dropdown" id="banDropdown"></div>
-        </div>
-      </div>
-    </main>
-
-    <div class="log" id="log"></div>
-
-    <footer>
-      <label class="autostart-label">
-        <input type="checkbox" id="autoStart">
-        <span>Engegar amb Windows</span>
-      </label>
-      <label class="autostart-label">
-        <input type="checkbox" id="restoreFocus">
-        <span>Retornar focus després d'acceptar/pickar</span>
-      </label>
-    </footer>
+    </div>
   </div>
 
   <script src="main.js"></script>

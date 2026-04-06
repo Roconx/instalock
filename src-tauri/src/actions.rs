@@ -5,13 +5,11 @@ pub async fn accept_match(creds: &LcuCredentials) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn pick_champion(creds: &LcuCredentials, champion_id: i32) -> Result<(), String> {
-    let action_id = find_my_action(creds, "pick").await?;
+pub async fn pick_champion(creds: &LcuCredentials, action_id: i64, champion_id: i32) -> Result<(), String> {
     hover_and_lock(creds, action_id, champion_id).await
 }
 
-pub async fn ban_champion(creds: &LcuCredentials, champion_id: i32) -> Result<(), String> {
-    let action_id = find_my_action(creds, "ban").await?;
+pub async fn ban_champion(creds: &LcuCredentials, action_id: i64, champion_id: i32) -> Result<(), String> {
     hover_and_lock(creds, action_id, champion_id).await
 }
 
@@ -29,35 +27,6 @@ pub async fn pick_bravery(creds: &LcuCredentials, action_id: i64) -> Result<(), 
     });
     lcu_request(creds, "PATCH", &url, Some(body)).await?;
     Ok(())
-}
-
-async fn find_my_action(creds: &LcuCredentials, action_type: &str) -> Result<i64, String> {
-    let session = lcu_request(creds, "GET", "/lol-champ-select/v1/session", None).await?;
-
-    let my_cell_id = session["localPlayerCellId"]
-        .as_i64()
-        .ok_or("No localPlayerCellId")?;
-
-    let actions = session["actions"]
-        .as_array()
-        .ok_or("No actions array")?;
-
-    for group in actions {
-        if let Some(group_arr) = group.as_array() {
-            for action in group_arr {
-                let actor = action["actorCellId"].as_i64().unwrap_or(-1);
-                let atype = action["type"].as_str().unwrap_or("");
-                let in_progress = action["isInProgress"].as_bool().unwrap_or(false);
-                let completed = action["completed"].as_bool().unwrap_or(true);
-
-                if actor == my_cell_id && atype == action_type && in_progress && !completed {
-                    return action["id"].as_i64().ok_or("No action id".to_string());
-                }
-            }
-        }
-    }
-
-    Err(format!("No active {} action found", action_type))
 }
 
 async fn hover_and_lock(
