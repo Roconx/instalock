@@ -149,10 +149,12 @@ function toggleSettingsView() {
     settingsView.classList.add("hidden");
     mainView.classList.remove("hidden");
     settingsBtn.classList.remove("active");
+    logEl.classList.remove("hidden");
   } else {
     mainView.classList.add("hidden");
     settingsView.classList.remove("hidden");
     settingsBtn.classList.add("active");
+    logEl.classList.add("hidden");
   }
 }
 
@@ -181,6 +183,10 @@ async function init() {
   // Focus restore toggle
   const restoreFocusEl = document.getElementById("restoreFocus");
   restoreFocusEl.addEventListener("change", () => saveSettingsDebounced());
+
+  // Hover pick toggle
+  const hoverPickEl = document.getElementById("hoverPick");
+  hoverPickEl.addEventListener("change", () => saveSettingsDebounced());
 
   // Setup autocompletes
   setupAutocomplete(pickChampion, pickDropdown);
@@ -238,7 +244,10 @@ async function init() {
 
   // Overlay settings listeners
   const overlayEnabled = document.getElementById("overlayEnabled");
-  if (overlayEnabled) overlayEnabled.addEventListener("change", () => saveSettingsDebounced());
+  if (overlayEnabled) overlayEnabled.addEventListener("change", () => {
+    // Save immediately for overlay toggle (not debounced) to avoid losing state
+    invoke("update_settings", { settings: collectSettings() });
+  });
   const overlayOpacity = document.getElementById("overlayOpacity");
   const overlayOpacityValue = document.getElementById("overlayOpacityValue");
   if (overlayOpacity) {
@@ -274,6 +283,10 @@ function applySettings(s) {
   if (restoreFocusEl) {
     restoreFocusEl.checked = s.restoreFocusAfterAction !== false;
   }
+  const hoverPickEl = document.getElementById("hoverPick");
+  if (hoverPickEl) {
+    hoverPickEl.checked = s.hoverPick || false;
+  }
 
   // Delays
   acceptDelay.value = s.acceptDelaySecs || 0;
@@ -286,6 +299,8 @@ function applySettings(s) {
   actionMarginValue.textContent = formatDelay(actionMargin.value);
 
   // Overlay settings
+  _overlayX = s.overlayX ?? null;
+  _overlayY = s.overlayY ?? null;
   const overlayEnabled = document.getElementById("overlayEnabled");
   if (overlayEnabled) overlayEnabled.checked = s.overlayEnabled !== false;
   const overlayOpacity = document.getElementById("overlayOpacity");
@@ -304,6 +319,10 @@ function applySettings(s) {
   updateCardBodyStates();
 }
 
+// Cache overlay position from last backend read so we don't lose it on save
+let _overlayX = null;
+let _overlayY = null;
+
 function collectSettings() {
   const restoreFocusEl = document.getElementById("restoreFocus");
   return {
@@ -314,12 +333,15 @@ function collectSettings() {
     pickChampion: pickChampion.value.trim(),
     banChampion: banChampion.value.trim(),
     restoreFocusAfterAction: restoreFocusEl ? restoreFocusEl.checked : true,
+    hoverPick: document.getElementById("hoverPick")?.checked || false,
     acceptDelaySecs: parseFloat(acceptDelay.value) || 0,
     pickDelaySecs: parseFloat(pickDelay.value) || 0,
     banDelaySecs: parseFloat(banDelay.value) || 0,
     actionMarginSecs: parseFloat(actionMargin.value) || 1.5,
     overlayEnabled: document.getElementById("overlayEnabled")?.checked ?? true,
     overlayOpacity: parseFloat(document.getElementById("overlayOpacity")?.value) || 0.8,
+    overlayX: _overlayX,
+    overlayY: _overlayY,
     syncEnabled: document.getElementById("syncEnabled")?.checked || false,
     syncServerUrl: document.getElementById("syncServerUrl")?.value?.trim() || "ws://localhost:9876",
   };
@@ -331,6 +353,14 @@ function saveSettingsDebounced() {
     await invoke("update_settings", { settings: collectSettings() });
   }, 300);
 }
+
+// Save immediately on close so debounced changes aren't lost
+window.addEventListener("beforeunload", () => {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+    invoke("update_settings", { settings: collectSettings() });
+  }
+});
 
 async function loadChampions() {
   const names = await invoke("get_champions");

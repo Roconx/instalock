@@ -13,7 +13,6 @@
     "core:window:allow-close",
     "autostart:allow-enable",
     "autostart:allow-disable",
-    "autostart:allow-is-enabled",
-    "global-shortcut:default"
+    "autostart:allow-is-enabled"
   ]
 }

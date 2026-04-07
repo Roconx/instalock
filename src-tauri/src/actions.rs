@@ -29,28 +29,30 @@ pub async fn pick_bravery(creds: &LcuCredentials, action_id: i64) -> Result<(), 
     Ok(())
 }
 
+pub async fn hover_champion(creds: &LcuCredentials, action_id: i64, champion_id: i32) -> Result<(), String> {
+    let url = format!("/lol-champ-select/v1/session/actions/{}", action_id);
+    let body = serde_json::json!({ "championId": champion_id });
+    lcu_request(creds, "PATCH", &url, Some(body)).await?;
+    Ok(())
+}
+
+pub async fn lock_champion(creds: &LcuCredentials, action_id: i64, champion_id: i32) -> Result<(), String> {
+    let url = format!("/lol-champ-select/v1/session/actions/{}", action_id);
+    let body = serde_json::json!({
+        "championId": champion_id,
+        "completed": true
+    });
+    lcu_request(creds, "PATCH", &url, Some(body)).await?;
+    Ok(())
+}
+
 async fn hover_and_lock(
     creds: &LcuCredentials,
     action_id: i64,
     champion_id: i32,
 ) -> Result<(), String> {
-    let url = format!("/lol-champ-select/v1/session/actions/{}", action_id);
-
-    // Step 1: Select/hover the champion
-    let hover_body = serde_json::json!({
-        "championId": champion_id
-    });
-    lcu_request(creds, "PATCH", &url, Some(hover_body)).await?;
-
-    // Small delay to let the client register the hover
+    hover_champion(creds, action_id, champion_id).await?;
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-    // Step 2: Lock in (complete the action)
-    let lock_body = serde_json::json!({
-        "championId": champion_id,
-        "completed": true
-    });
-    lcu_request(creds, "PATCH", &url, Some(lock_body)).await?;
-
+    lock_champion(creds, action_id, champion_id).await?;
     Ok(())
 }

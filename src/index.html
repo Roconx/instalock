@@ -80,8 +80,6 @@
           </div>
         </section>
       </main>
-
-      <div class="log" id="log"></div>
     </div>
 
     <!-- Settings view -->
@@ -103,6 +101,10 @@
           <label class="settings-item">
             <span class="settings-item-label">Retornar focus després d'acció</span>
             <input type="checkbox" id="restoreFocus">
+          </label>
+          <label class="settings-item">
+            <span class="settings-item-label">Hover champion abans de lockejar</span>
+            <input type="checkbox" id="hoverPick">
           </label>
         </div>
       </div>
@@ -140,7 +142,6 @@
           </div>
         </div>
       </div>
-    </div>
 
       <div class="settings-section">
         <div class="settings-section-title">Overlay</div>
@@ -173,6 +174,9 @@
         </div>
       </div>
     </div>
+
+    <!-- Log always visible at bottom -->
+    <div class="log" id="log"></div>
   </div>
 
   <script src="main.js"></script>

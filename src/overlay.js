@@ -12,22 +12,27 @@ let timers = {};
 // Community Dragon CDN base for icons
 const CD_BASE = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1";
 
-function champIconUrl(championId) {
-  return `${CD_BASE}/champion-icons/${championId}.png`;
+function champIconUrl(championId, championName) {
+  if (championId && championId > 0) {
+    return `${CD_BASE}/champion-icons/${championId}.png`;
+  }
+  // Fallback: use ddragon by champion name
+  return `https://ddragon.leagueoflegends.com/cdn/img/champion/tiles/${championName}_0.jpg`;
 }
 
-// Spell icon mapping (spell ID -> file path in Community Dragon)
+// Spell icon URLs from Community Dragon (paths match summoner-spells.json iconPath)
+const CD_SPELL = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/data/spells/icons2d";
 const SPELL_ICONS = {
-  4: "https://raw.communitydragon.org/latest/game/data/spells/icons2d/summoner_flash.png",
-  7: "https://raw.communitydragon.org/latest/game/data/spells/icons2d/summoner_heal.png",
-  6: "https://raw.communitydragon.org/latest/game/data/spells/icons2d/summoner_haste.png",
-  21: "https://raw.communitydragon.org/latest/game/data/spells/icons2d/summoner_barrier.png",
-  3: "https://raw.communitydragon.org/latest/game/data/spells/icons2d/summoner_exhaust.png",
-  14: "https://raw.communitydragon.org/latest/game/data/spells/icons2d/summoner_dot.png",
-  1: "https://raw.communitydragon.org/latest/game/data/spells/icons2d/summoner_boost.png",
-  12: "https://raw.communitydragon.org/latest/game/data/spells/icons2d/summoner_teleport.png",
-  11: "https://raw.communitydragon.org/latest/game/data/spells/icons2d/summoner_smite.png",
-  32: "https://raw.communitydragon.org/latest/game/data/spells/icons2d/summoner_snowball.png",
+  1: `${CD_SPELL}/summoner_boost.png`,        // Cleanse
+  3: `${CD_SPELL}/summoner_exhaust.png`,      // Exhaust
+  4: `${CD_SPELL}/summoner_flash.png`,        // Flash
+  6: `${CD_SPELL}/summoner_haste.png`,        // Ghost
+  7: `${CD_SPELL}/summoner_heal.png`,         // Heal
+  11: `${CD_SPELL}/summoner_smite.png`,       // Smite
+  12: `${CD_SPELL}/summoner_teleport.png`,     // Teleport
+  14: `${CD_SPELL}/summoner_ignite.png`,      // Ignite
+  21: `${CD_SPELL}/summoner_barrier.png`,     // Barrier
+  32: `${CD_SPELL}/summoner_mark.png`,        // Mark (ARAM)
 };
 
 function formatTime(secs) {
@@ -110,7 +115,7 @@ function renderEnemies(enemies) {
     const champDiv = document.createElement("div");
     champDiv.className = "champ-icon";
     const champImg = document.createElement("img");
-    champImg.src = champIconUrl(enemy.championId);
+    champImg.src = champIconUrl(enemy.championId, enemy.championName);
     champImg.alt = enemy.championName;
     champImg.onerror = () => { champImg.style.display = "none"; };
     champDiv.appendChild(champImg);
@@ -152,12 +157,17 @@ function renderEnemies(enemies) {
       spellDiv.className = "spell";
       spellDiv.dataset.enemy = idx;
       spellDiv.dataset.spell = spell.idx;
-      spellDiv.title = `${spell.name} (${spell.cd}s)`;
+      const spellKnown = spell.id > 0 && SPELL_ICONS[spell.id];
+      spellDiv.title = spellKnown ? `${spell.name} (${spell.cd}s)` : "?";
 
       const img = document.createElement("img");
-      img.src = SPELL_ICONS[spell.id] || "";
-      img.alt = spell.name;
-      img.onerror = () => { img.style.display = "none"; };
+      if (spellKnown) {
+        img.src = SPELL_ICONS[spell.id];
+        img.alt = spell.name;
+        img.onerror = () => { img.style.display = "none"; };
+      } else {
+        img.style.display = "none";
+      }
       spellDiv.appendChild(img);
 
       const timerEl = document.createElement("div");
@@ -229,6 +239,11 @@ async function init() {
   const settings = await invoke("get_settings");
   overlayEl.style.setProperty("--opacity", settings.overlayOpacity || 0.8);
 
+  // Listen for opacity changes
+  await listen("overlay-opacity", (event) => {
+    overlayEl.style.setProperty("--opacity", event.payload);
+  });
+
   // Listen for enemy data
   await listen("overlay-data", (event) => {
     currentEnemies = event.payload;
@@ -260,17 +275,18 @@ async function init() {
     }
   });
 
-  // Try to load initial data
-  try {
-    const enemies = await invoke("get_overlay_data");
-    if (enemies && enemies.length > 0) {
-      currentEnemies = enemies;
-      renderEnemies(currentEnemies);
-    } else {
-      enemiesEl.innerHTML = '<div class="loading">Esperant dades...</div>';
-    }
-  } catch {
-    enemiesEl.innerHTML = '<div class="loading">Esperant dades...</div>';
+  // Try to load initial data with retries
+  enemiesEl.innerHTML = '<div class="loading">Esperant dades...</div>';
+  for (let i = 0; i < 30; i++) {
+    try {
+      const enemies = await invoke("get_overlay_data");
+      if (enemies && enemies.length > 0) {
+        currentEnemies = enemies;
+        renderEnemies(currentEnemies);
+        break;
+      }
+    } catch { /* ignore */ }
+    await new Promise(r => setTimeout(r, 2000));
   }
 }
 

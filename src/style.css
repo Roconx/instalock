@@ -10,6 +10,7 @@ body {
   color: #c8c8d4;
   user-select: none;
   overflow: hidden;
+  height: 100vh;
 }
 
 .app {
@@ -108,6 +109,28 @@ h1 {
 
 /* ── Cards ── */
 
+#mainView, #settingsView {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+#mainView::-webkit-scrollbar,
+#settingsView::-webkit-scrollbar {
+  width: 4px;
+}
+
+#mainView::-webkit-scrollbar-track,
+#settingsView::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#mainView::-webkit-scrollbar-thumb,
+#settingsView::-webkit-scrollbar-thumb {
+  background: #1e1e38;
+  border-radius: 2px;
+}
+
 main {
   display: flex;
   flex-direction: column;
@@ -118,7 +141,7 @@ main {
   background: #141428;
   border: 1px solid #1e1e38;
   border-radius: 10px;
-  overflow: hidden;
+  overflow: visible;
   transition: border-color 0.2s;
 }
 
@@ -370,7 +393,8 @@ body[data-queue-mode="ARAM"] .ban-row {
 
 .log {
   margin-top: 12px;
-  flex: 1;
+  height: 120px;
+  flex-shrink: 0;
   overflow-y: auto;
   padding: 10px 12px;
   background: #0a0a18;
@@ -427,7 +451,6 @@ body[data-queue-mode="ARAM"] .ban-row {
 #settingsView {
   display: flex;
   flex-direction: column;
-  flex: 1;
 }
 
 .settings-back {
@@ -506,7 +529,7 @@ body[data-queue-mode="ARAM"] .ban-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 120px;
+  width: 160px;
   flex-shrink: 0;
 }
 

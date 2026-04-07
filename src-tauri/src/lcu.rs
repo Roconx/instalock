@@ -186,6 +186,20 @@ async fn run_session(
     // update that may never come).
     let _ = event_tx.send(fetch_initial_lobby(creds).await);
 
+    // Fire an initial gameflow phase snapshot so the overlay opens if already in-game
+    if let Ok(data) = lcu_request(creds, "GET", "/lol-gameflow/v1/gameflow-phase", None).await {
+        if let Some(phase) = data.as_str() {
+            let _ = event_tx.send(LcuEvent::GameflowPhase(phase.to_string()));
+        }
+    }
+
+    // If already in champ select, fetch the session for enemy data
+    if let Ok(data) = lcu_request(creds, "GET", "/lol-champ-select/v1/session", None).await {
+        if data.get("theirTeam").is_some() {
+            let _ = event_tx.send(LcuEvent::ChampSelect(data));
+        }
+    }
+
     // 3. Subscribe and run the message loop. Any error from here on represents a
     //    real disconnect that must be paired with a Disconnected event below.
     let loop_result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {

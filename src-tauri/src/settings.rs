@@ -16,6 +16,8 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub restore_focus_after_action: bool,
     #[serde(default)]
+    pub hover_pick: bool,
+    #[serde(default)]
     pub accept_delay_secs: f64,
     #[serde(default)]
     pub pick_delay_secs: f64,
@@ -64,6 +66,7 @@ impl Default for Settings {
             pick_champion: String::new(),
             ban_champion: String::new(),
             bravery_enabled: false,
+            hover_pick: false,
             restore_focus_after_action: true,
             accept_delay_secs: 0.0,
             pick_delay_secs: 0.0,

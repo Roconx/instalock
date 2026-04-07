@@ -4,6 +4,7 @@
 mod actions;
 mod champions;
 mod focus;
+mod hotkey;
 mod lcu;
 mod overlay;
 mod settings;
@@ -14,10 +15,8 @@ use lcu::{LcuEvent, LcuMonitor, QueueModeInfo};
 use overlay::OverlayState;
 use settings::{Settings, SettingsManager};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 struct AppState {
     settings_manager: SettingsManager,
@@ -37,8 +36,53 @@ fn get_settings(state: tauri::State<'_, Arc<AppState>>) -> Settings {
 }
 
 #[tauri::command]
-fn update_settings(state: tauri::State<'_, Arc<AppState>>, settings: Settings) {
-    state.settings_manager.update(settings);
+fn update_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    settings: Settings,
+) {
+    let old = state.settings_manager.get();
+    let overlay_changed = settings.overlay_enabled != old.overlay_enabled;
+    let overlay_on = settings.overlay_enabled;
+    let opacity_changed = (settings.overlay_opacity - old.overlay_opacity).abs() > 0.001;
+    let opacity = settings.overlay_opacity;
+
+    // Save first, react after
+    state.settings_manager.update(settings.clone());
+
+    if opacity_changed {
+        let _ = app.emit("overlay-opacity", opacity);
+    }
+
+    if overlay_changed {
+        let overlay_state = state.overlay_state.clone();
+        let ah = app.clone();
+        // Spawn overlay creation/destruction off the main thread to avoid deadlock
+        tauri::async_runtime::spawn(async move {
+            if overlay_on {
+                let s = Settings { overlay_enabled: true, overlay_opacity: opacity, ..settings };
+                match create_overlay_window(&ah, &s) {
+                    Ok(_) => {
+                        let _ = ah.emit("log", "Overlay activat");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        let enemies = overlay_state.enemies.lock().await.clone();
+                        let _ = ah.emit("overlay-data", &enemies);
+                        overlay::poll_live_client_runes(overlay_state.clone()).await;
+                        let enemies = overlay_state.enemies.lock().await.clone();
+                        let _ = ah.emit("overlay-data", &enemies);
+                    }
+                    Err(e) => {
+                        let _ = ah.emit("log", &format!("Error overlay: {}", e));
+                    }
+                }
+            } else {
+                if let Some(w) = ah.get_webview_window("overlay") {
+                    let _ = w.close();
+                }
+                let _ = ah.emit("log", "Overlay desactivat");
+            }
+        });
+    }
 }
 
 #[tauri::command]
@@ -152,7 +196,6 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--autostart"]),
         ))
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(app_state.clone())
         .invoke_handler(tauri::generate_handler![
             get_settings,
@@ -166,24 +209,26 @@ fn main() {
             send_timer_event,
             cancel_timer_event,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if window.label() == "main" {
+                    // Close overlay when main window is closed
+                    if let Some(overlay) = window.app_handle().get_webview_window("overlay") {
+                        let _ = overlay.close();
+                    }
+                }
+            }
+        })
         .setup(move |app| {
             let app_handle = app.handle().clone();
             let state = app_state.clone();
 
-            // Register global shortcut Alt+T for overlay toggle
-            let overlay_interactive = Arc::new(AtomicBool::new(false));
-            let alt_t = Shortcut::new(Some(Modifiers::ALT), Code::KeyT);
-            let oi = overlay_interactive.clone();
+            // Poll Shift key state: hold to interact with overlay, release to click-through
             let ah_shortcut = app.handle().clone();
-            let _ = app.global_shortcut().on_shortcut(alt_t, move |_app, _shortcut, event| {
-                if let ShortcutState::Pressed = event.state {
-                    let interactive = !oi.load(Ordering::SeqCst);
-                    oi.store(interactive, Ordering::SeqCst);
-
-                    if let Some(overlay_win) = ah_shortcut.get_webview_window("overlay") {
-                        let _ = overlay_win.set_ignore_cursor_events(!interactive);
-                        let _ = ah_shortcut.emit("overlay-interactive", interactive);
-                    }
+            hotkey::start_shift_poll(move |pressed| {
+                if let Some(overlay_win) = ah_shortcut.get_webview_window("overlay") {
+                    let _ = overlay_win.set_ignore_cursor_events(!pressed);
+                    let _ = ah_shortcut.emit("overlay-interactive", pressed);
                 }
             });
 
@@ -261,15 +306,21 @@ async fn handle_gameflow_phase(state: &Arc<AppState>, app_handle: &tauri::AppHan
                 } else {
                     let _ = app_handle.emit("log", "Overlay obert");
 
-                    // Send enemy data to overlay
-                    let enemies = state.overlay_state.enemies.lock().await.clone();
-                    let _ = app_handle.emit("overlay-data", &enemies);
-
-                    // Start polling for rune data
+                    // Start polling for rune data + emit to overlay once ready
                     let overlay_state = state.overlay_state.clone();
                     let ah = app_handle.clone();
                     tokio::spawn(async move {
+                        // Wait a bit for the overlay window to initialize its JS listeners
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+                        // Send initial data
+                        let enemies = overlay_state.enemies.lock().await.clone();
+                        let _ = ah.emit("overlay-data", &enemies);
+
+                        // Poll for rune data (retries internally)
                         overlay::poll_live_client_runes(overlay_state.clone()).await;
+
+                        // Send updated data with runes
                         let enemies = overlay_state.enemies.lock().await.clone();
                         let _ = ah.emit("overlay-data", &enemies);
                     });
@@ -354,6 +405,7 @@ fn create_overlay_window(
     .title("InstaLock Overlay")
     .inner_size(300.0, 340.0)
     .transparent(true)
+    .shadow(false)
     .decorations(false)
     .always_on_top(true)
     .skip_taskbar(true)
@@ -368,6 +420,70 @@ fn create_overlay_window(
 
     let window = builder.build().map_err(|e| e.to_string())?;
     let _ = window.set_ignore_cursor_events(true);
+
+    // Windows: match electron-overlay-window pattern
+    // - TOOLWINDOW + NOACTIVATE styles
+    // - Monitor foreground changes with SetWinEventHook
+    // - Re-assert TOPMOST when LoL has focus, hide when not
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+
+        unsafe {
+            let ex_style = GetWindowLongW(hwnd as _, GWL_EXSTYLE);
+            SetWindowLongW(
+                hwnd as _,
+                GWL_EXSTYLE,
+                ex_style | WS_EX_TOOLWINDOW as i32 | WS_EX_NOACTIVATE as i32,
+            );
+        }
+
+        std::thread::spawn(move || {
+            use windows_sys::Win32::UI::WindowsAndMessaging::*;
+            unsafe {
+                // Initial TOPMOST
+                SetWindowPos(
+                    hwnd as *mut std::ffi::c_void,
+                    HWND_TOPMOST,
+                    0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+
+                // Poll foreground window — show overlay when LoL is focused
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+
+                    let fg = GetForegroundWindow();
+                    if fg.is_null() {
+                        continue;
+                    }
+
+                    // Check if foreground window is LoL or our overlay
+                    let mut title = [0u16; 256];
+                    let len = GetWindowTextW(fg, title.as_mut_ptr(), 256);
+                    let title_str = String::from_utf16_lossy(&title[..len as usize]);
+
+                    let is_lol = title_str.contains("League of Legends");
+                    let is_overlay = fg as isize == hwnd;
+
+                    if is_lol || is_overlay {
+                        // Show and re-assert TOPMOST
+                        ShowWindow(hwnd as _, SW_SHOWNOACTIVATE);
+                        SetWindowPos(
+                            hwnd as *mut std::ffi::c_void,
+                            HWND_TOPMOST,
+                            0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                        );
+                    } else {
+                        // Hide overlay when LoL is not focused
+                        ShowWindow(hwnd as _, SW_HIDE);
+                    }
+                }
+            }
+        });
+    }
 
     Ok(())
 }
@@ -575,23 +691,48 @@ async fn handle_champ_select(
             }
         }
         "pick" if settings.auto_pick && !settings.pick_champion.is_empty() => {
-            let delay = settings
-                .pick_delay_secs
-                .min(timer_left - settings.action_margin_secs)
-                .max(0.0);
-            if delay > 0.0 {
-                tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
-            }
             if let Some(champ_id) = state.champions.resolve_id(&settings.pick_champion) {
-                match actions::pick_champion(&creds, action_id, champ_id).await {
-                    Ok(_) => {
-                        let _ = app_handle
-                            .emit("log", &format!("Picked {}!", settings.pick_champion));
-                        spawn_focus_restore(captured_hwnd);
+                if settings.hover_pick {
+                    // Hover immediately so teammates see the pick
+                    if let Err(e) = actions::hover_champion(&creds, action_id, champ_id).await {
+                        let _ = app_handle.emit("log", &format!("Error hovering: {}", e));
+                    } else {
+                        let _ = app_handle.emit("log", &format!("Hovering {}...", settings.pick_champion));
                     }
-                    Err(e) => {
-                        let _ = app_handle.emit("log", &format!("Error picking: {}", e));
-                        *state.last_action.lock().await = String::new();
+                    let delay = settings
+                        .pick_delay_secs
+                        .min(timer_left - settings.action_margin_secs)
+                        .max(0.0);
+                    if delay > 0.0 {
+                        tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+                    }
+                    match actions::lock_champion(&creds, action_id, champ_id).await {
+                        Ok(_) => {
+                            let _ = app_handle.emit("log", &format!("Picked {}!", settings.pick_champion));
+                            spawn_focus_restore(captured_hwnd);
+                        }
+                        Err(e) => {
+                            let _ = app_handle.emit("log", &format!("Error picking: {}", e));
+                            *state.last_action.lock().await = String::new();
+                        }
+                    }
+                } else {
+                    let delay = settings
+                        .pick_delay_secs
+                        .min(timer_left - settings.action_margin_secs)
+                        .max(0.0);
+                    if delay > 0.0 {
+                        tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+                    }
+                    match actions::pick_champion(&creds, action_id, champ_id).await {
+                        Ok(_) => {
+                            let _ = app_handle.emit("log", &format!("Picked {}!", settings.pick_champion));
+                            spawn_focus_restore(captured_hwnd);
+                        }
+                        Err(e) => {
+                            let _ = app_handle.emit("log", &format!("Error picking: {}", e));
+                            *state.last_action.lock().await = String::new();
+                        }
                     }
                 }
             } else {
