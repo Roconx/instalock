@@ -51,6 +51,8 @@ pub fn extract_enemies(
         return Vec::new();
     };
 
+    log::debug!("extract_enemies: theirTeam has {} players", their_team.len());
+
     let mut enemies: Vec<(u8, EnemyData)> = their_team
         .iter()
         .filter_map(|player| {
@@ -60,16 +62,14 @@ pub fn extract_enemies(
             }
             let spell1_id = player.get("spell1Id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
             let spell2_id = player.get("spell2Id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let position = player.get("assignedPosition").and_then(|v| v.as_str()).unwrap_or("");
+            log::debug!("  champId={} spell1={} spell2={} pos={}", champion_id, spell1_id, spell2_id, position);
 
             let champion_name = id_to_name
                 .get(&champion_id)
                 .cloned()
                 .unwrap_or_else(|| format!("Champion {}", champion_id));
 
-            let position = player
-                .get("assignedPosition")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
             let order = role_order(position);
 
             Some((order, EnemyData {
@@ -167,6 +167,17 @@ pub async fn poll_live_client_runes(overlay_state: Arc<OverlayState>) {
 
         if live_enemies.is_empty() {
             continue;
+        }
+
+        // Log raw enemy data for debugging
+        for player in &live_enemies {
+            let name = player.get("championName").and_then(|n| n.as_str()).unwrap_or("?");
+            let pos = player.get("position").and_then(|n| n.as_str()).unwrap_or("?");
+            let s1 = player.pointer("/summonerSpells/summonerSpellOne/displayName")
+                .and_then(|n| n.as_str()).unwrap_or("?");
+            let s2 = player.pointer("/summonerSpells/summonerSpellTwo/displayName")
+                .and_then(|n| n.as_str()).unwrap_or("?");
+            log::info!("LiveClient enemy: {} [{}] spells: {}, {}", name, pos, s1, s2);
         }
 
         // If enemies list is empty (e.g. practice tool, no champ select data),
@@ -311,7 +322,10 @@ fn spell_id_from_display_name(name: &str) -> i32 {
         "Teleport" => 12,
         "Smite" => 11,
         "Mark" => 32,
-        _ => 4, // fallback
+        _ => {
+            log::warn!("Unknown spell display name: '{}' — defaulting to 0", name);
+            0
+        }
     }
 }
 

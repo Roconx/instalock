@@ -178,7 +178,49 @@ async fn cancel_timer_event(
     Ok(())
 }
 
+fn setup_file_logger() {
+    use std::io::Write;
+
+    let log_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("InstaLock");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_path = log_dir.join("instalock.log");
+
+    // Truncate if > 5MB
+    if let Ok(meta) = std::fs::metadata(&log_path) {
+        if meta.len() > 5_000_000 {
+            let _ = std::fs::remove_file(&log_path);
+        }
+    }
+
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .expect("Cannot open log file");
+
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Debug)
+        .format(move |buf, record| {
+            writeln!(
+                buf,
+                "[{}] {} - {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                record.args()
+            )
+        })
+        .target(env_logger::Target::Pipe(Box::new(file)))
+        .init();
+
+    log::info!("=== InstaLock started ===");
+    log::info!("Log file: {}", log_path.display());
+}
+
 fn main() {
+    setup_file_logger();
+
     let overlay_state = Arc::new(OverlayState::new());
 
     let app_state = Arc::new(AppState {
