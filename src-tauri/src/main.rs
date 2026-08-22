@@ -15,6 +15,7 @@ use lcu::{LcuEvent, LcuMonitor, QueueModeInfo};
 use overlay::OverlayState;
 use settings::{Settings, SettingsManager};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -46,6 +47,15 @@ fn update_settings(
     let overlay_on = settings.overlay_enabled;
     let opacity_changed = (settings.overlay_opacity - old.overlay_opacity).abs() > 0.001;
     let opacity = settings.overlay_opacity;
+
+    // Preserve overlay position (managed by save_overlay_position, not the frontend)
+    let mut settings = settings;
+    if settings.overlay_x.is_none() {
+        settings.overlay_x = old.overlay_x;
+    }
+    if settings.overlay_y.is_none() {
+        settings.overlay_y = old.overlay_y;
+    }
 
     // Save first, react after
     state.settings_manager.update(settings.clone());
@@ -221,7 +231,9 @@ fn setup_file_logger() {
 fn main() {
     setup_file_logger();
 
-    let overlay_state = Arc::new(OverlayState::new());
+    let overlay_state = Arc::new(
+        tokio::runtime::Runtime::new().unwrap().block_on(OverlayState::new())
+    );
 
     let app_state = Arc::new(AppState {
         settings_manager: SettingsManager::new(),
@@ -286,8 +298,22 @@ fn main() {
                 state.lcu_monitor.start();
                 let mut event_rx = state.lcu_monitor.event_tx.subscribe();
 
-                // Listen for LCU events and react
-                while let Ok(event) = event_rx.recv().await {
+                // Listen for LCU events and react.
+                //
+                // A broadcast receiver reports Err(Lagged) when it falls behind
+                // rather than yielding an event. Treating that as termination
+                // would silently kill every reaction (pick, ban, overlay) for
+                // the rest of the session, so only Closed ends the loop.
+                loop {
+                    let event = match event_rx.recv().await {
+                        Ok(event) => event,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            log::warn!("LCU event receiver lagged, {} events dropped", n);
+                            continue;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    };
+
                     match event {
                         LcuEvent::Connected => {
                             let _ = app_handle.emit("lcu-status", true);
@@ -303,17 +329,31 @@ fn main() {
                             let _ = app_handle.emit("queue-mode", serde_json::Value::Null);
                         }
                         LcuEvent::ReadyCheck(data) => {
-                            handle_ready_check(&state, &app_handle, &data).await;
+                            // Spawned: the handler sleeps for the configured
+                            // accept delay and must not stall event reception.
+                            let state = state.clone();
+                            let app_handle = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                handle_ready_check(&state, &app_handle, &data).await;
+                            });
                         }
                         LcuEvent::ChampSelect(data) => {
                             // Extract enemy data for overlay
                             let id_to_name = state.champions.get_id_to_name();
-                            let enemies = overlay::extract_enemies(&data, &id_to_name);
+                            let enemies = overlay::extract_enemies(&data, &id_to_name, &state.overlay_state.spells);
                             if !enemies.is_empty() {
                                 *state.overlay_state.enemies.lock().await = enemies;
                             }
 
-                            handle_champ_select(&state, &app_handle, &data).await;
+                            // Spawned: the handler sleeps for the configured
+                            // pick/ban delays. `last_action` is written inside
+                            // its mutex before any await, so overlapping
+                            // invocations still dedupe correctly.
+                            let state = state.clone();
+                            let app_handle = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                handle_champ_select(&state, &app_handle, &data).await;
+                            });
                         }
                         LcuEvent::GameflowPhase(phase) => {
                             handle_gameflow_phase(&state, &app_handle, &phase).await;
@@ -364,6 +404,10 @@ async fn handle_gameflow_phase(state: &Arc<AppState>, app_handle: &tauri::AppHan
 
                         // Send updated data with runes
                         let enemies = overlay_state.enemies.lock().await.clone();
+                        for e in &enemies {
+                            log::info!("Overlay emit: {} spell1={}({}) spell2={}({})",
+                                e.champion_name, e.spell1_name, e.spell1_icon, e.spell2_name, e.spell2_icon);
+                        }
                         let _ = ah.emit("overlay-data", &enemies);
                     });
                 }
@@ -445,7 +489,7 @@ fn create_overlay_window(
         tauri::WebviewUrl::App("overlay.html".into()),
     )
     .title("InstaLock Overlay")
-    .inner_size(300.0, 340.0)
+    .inner_size(230.0, 310.0)
     .transparent(true)
     .shadow(false)
     .decorations(false)
@@ -588,6 +632,11 @@ async fn handle_ready_check(
     }
 }
 
+/// Clamp a configured delay so we always act before the phase timer expires.
+fn clamp_delay(delay_secs: f64, timer_left: f64, margin: f64) -> f64 {
+    delay_secs.min(timer_left - margin).max(0.0)
+}
+
 async fn handle_champ_select(
     state: &Arc<AppState>,
     app_handle: &tauri::AppHandle,
@@ -668,10 +717,21 @@ async fn handle_champ_select(
         *last = dedup_key;
     }
 
-    // Arena (CHERRY) has no human ban phase
-    if action_type == "ban" && mode.as_deref() == Some("CHERRY") {
-        return;
-    }
+    // Which ban/pick phases exist is decided by the LCU, not by us: if it hands
+    // us an action for our cell we act on it, whatever the mode.
+    let mode_label = mode.as_deref().unwrap_or("unknown");
+    log::info!(
+        "Champ select action: mode={} type={} action_id={} cell={} timer_left={:.1}s auto_pick={} auto_ban={} bravery={} hover_pick={}",
+        mode_label,
+        action_type,
+        action_id,
+        my_cell_id,
+        timer_left,
+        settings.auto_pick,
+        settings.auto_ban,
+        settings.bravery_enabled,
+        settings.hover_pick
+    );
 
     // Capture focus before any action
     let captured_hwnd = if settings.restore_focus_after_action {
@@ -682,26 +742,43 @@ async fn handle_champ_select(
 
     match action_type {
         "ban" if settings.auto_ban && !settings.ban_champion.is_empty() => {
-            let delay = settings
-                .ban_delay_secs
-                .min(timer_left - settings.action_margin_secs)
-                .max(0.0);
+            let delay = clamp_delay(
+                settings.ban_delay_secs,
+                timer_left,
+                settings.action_margin_secs,
+            );
             if delay > 0.0 {
-                tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+                tokio::time::sleep(Duration::from_secs_f64(delay)).await;
             }
             if let Some(champ_id) = state.champions.resolve_id(&settings.ban_champion) {
                 match actions::ban_champion(&creds, action_id, champ_id).await {
                     Ok(_) => {
+                        log::info!(
+                            "Banned {} (id {}) in {} after {:.1}s",
+                            settings.ban_champion,
+                            champ_id,
+                            mode_label,
+                            delay
+                        );
                         let _ = app_handle
                             .emit("log", &format!("Banned {}!", settings.ban_champion));
                         spawn_focus_restore(captured_hwnd);
                     }
                     Err(e) => {
+                        log::error!(
+                            "Ban failed: {} (id {}) action {} in {}: {}",
+                            settings.ban_champion,
+                            champ_id,
+                            action_id,
+                            mode_label,
+                            e
+                        );
                         let _ = app_handle.emit("log", &format!("Error banning: {}", e));
                         *state.last_action.lock().await = String::new();
                     }
                 }
             } else {
+                log::warn!("Champion '{}' not found for ban", settings.ban_champion);
                 let _ = app_handle.emit(
                     "log",
                     &format!("Champion '{}' no trobat per ban", settings.ban_champion),
@@ -709,75 +786,90 @@ async fn handle_champ_select(
                 *state.last_action.lock().await = String::new();
             }
         }
-        "pick"
-            if settings.auto_pick
-                && mode.as_deref() == Some("CHERRY")
-                && settings.bravery_enabled =>
-        {
-            let delay = settings
-                .pick_delay_secs
-                .min(timer_left - settings.action_margin_secs)
-                .max(0.0);
-            if delay > 0.0 {
-                tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
-            }
-            match actions::pick_bravery(&creds, action_id).await {
-                Ok(_) => {
-                    let _ = app_handle.emit("log", "Bravery activada!");
-                    spawn_focus_restore(captured_hwnd);
+        "pick" if settings.auto_pick => {
+            // Bravery is Arena-only. Every other mode uses the configured
+            // champion, so the two settings are independent.
+            let use_bravery = settings.bravery_enabled && mode.as_deref() == Some("CHERRY");
+            let delay = clamp_delay(
+                settings.pick_delay_secs,
+                timer_left,
+                settings.action_margin_secs,
+            );
+
+            if use_bravery {
+                if delay > 0.0 {
+                    tokio::time::sleep(Duration::from_secs_f64(delay)).await;
                 }
-                Err(e) => {
-                    let _ = app_handle.emit("log", &format!("Error Bravery: {}", e));
-                    *state.last_action.lock().await = String::new();
+                match actions::pick_bravery(&creds, action_id).await {
+                    Ok(_) => {
+                        log::info!("Bravery picked on action {} after {:.1}s", action_id, delay);
+                        let _ = app_handle.emit("log", "Bravery activada!");
+                        spawn_focus_restore(captured_hwnd);
+                    }
+                    Err(e) => {
+                        log::error!("Bravery failed on action {}: {}", action_id, e);
+                        let _ = app_handle.emit("log", &format!("Error Bravery: {}", e));
+                        *state.last_action.lock().await = String::new();
+                    }
                 }
-            }
-        }
-        "pick" if settings.auto_pick && !settings.pick_champion.is_empty() => {
-            if let Some(champ_id) = state.champions.resolve_id(&settings.pick_champion) {
-                if settings.hover_pick {
-                    // Hover immediately so teammates see the pick
+            } else if settings.pick_champion.is_empty() {
+                log::warn!(
+                    "No pick champion configured for mode {} (bravery only applies to Arena)",
+                    mode_label
+                );
+                let _ = app_handle.emit("log", "Cap campio configurat per al pick");
+                *state.last_action.lock().await = String::new();
+            } else if let Some(champ_id) = state.champions.resolve_id(&settings.pick_champion) {
+                let result = if settings.hover_pick {
+                    // Hover immediately so teammates see the pick, commit later.
                     if let Err(e) = actions::hover_champion(&creds, action_id, champ_id).await {
+                        log::warn!("Hover failed for {}: {}", settings.pick_champion, e);
                         let _ = app_handle.emit("log", &format!("Error hovering: {}", e));
                     } else {
-                        let _ = app_handle.emit("log", &format!("Hovering {}...", settings.pick_champion));
+                        let _ = app_handle
+                            .emit("log", &format!("Hovering {}...", settings.pick_champion));
                     }
-                    let delay = settings
-                        .pick_delay_secs
-                        .min(timer_left - settings.action_margin_secs)
-                        .max(0.0);
-                    if delay > 0.0 {
-                        tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
-                    }
-                    match actions::lock_champion(&creds, action_id, champ_id).await {
-                        Ok(_) => {
-                            let _ = app_handle.emit("log", &format!("Picked {}!", settings.pick_champion));
-                            spawn_focus_restore(captured_hwnd);
-                        }
-                        Err(e) => {
-                            let _ = app_handle.emit("log", &format!("Error picking: {}", e));
-                            *state.last_action.lock().await = String::new();
-                        }
-                    }
+                    // Never commit sooner than HOVER_LOCK_GAP after the hover:
+                    // back-to-back PATCHes on the same action get rejected.
+                    let gap = Duration::from_secs_f64(delay).max(actions::HOVER_LOCK_GAP);
+                    tokio::time::sleep(gap).await;
+                    actions::lock_champion(&creds, action_id, champ_id).await
                 } else {
-                    let delay = settings
-                        .pick_delay_secs
-                        .min(timer_left - settings.action_margin_secs)
-                        .max(0.0);
                     if delay > 0.0 {
-                        tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+                        tokio::time::sleep(Duration::from_secs_f64(delay)).await;
                     }
-                    match actions::pick_champion(&creds, action_id, champ_id).await {
-                        Ok(_) => {
-                            let _ = app_handle.emit("log", &format!("Picked {}!", settings.pick_champion));
-                            spawn_focus_restore(captured_hwnd);
-                        }
-                        Err(e) => {
-                            let _ = app_handle.emit("log", &format!("Error picking: {}", e));
-                            *state.last_action.lock().await = String::new();
-                        }
+                    actions::pick_champion(&creds, action_id, champ_id).await
+                };
+
+                match result {
+                    Ok(_) => {
+                        log::info!(
+                            "Picked {} (id {}) in {} after {:.1}s (hover_pick={})",
+                            settings.pick_champion,
+                            champ_id,
+                            mode_label,
+                            delay,
+                            settings.hover_pick
+                        );
+                        let _ = app_handle
+                            .emit("log", &format!("Picked {}!", settings.pick_champion));
+                        spawn_focus_restore(captured_hwnd);
+                    }
+                    Err(e) => {
+                        log::error!(
+                            "Pick failed: {} (id {}) action {} in {}: {}",
+                            settings.pick_champion,
+                            champ_id,
+                            action_id,
+                            mode_label,
+                            e
+                        );
+                        let _ = app_handle.emit("log", &format!("Error picking: {}", e));
+                        *state.last_action.lock().await = String::new();
                     }
                 }
             } else {
+                log::warn!("Champion '{}' not found for pick", settings.pick_champion);
                 let _ = app_handle.emit(
                     "log",
                     &format!("Champion '{}' no trobat per pick", settings.pick_champion),
@@ -787,6 +879,14 @@ async fn handle_champ_select(
         }
         _ => {
             // Reset dedup if we didn't act (e.g. feature disabled)
+            log::info!(
+                "Ignoring {} action {} in {} (auto_pick={}, auto_ban={})",
+                action_type,
+                action_id,
+                mode_label,
+                settings.auto_pick,
+                settings.auto_ban
+            );
             *state.last_action.lock().await = String::new();
         }
     }

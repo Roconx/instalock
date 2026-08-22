@@ -20,20 +20,7 @@ function champIconUrl(championId, championName) {
   return `https://ddragon.leagueoflegends.com/cdn/img/champion/tiles/${championName}_0.jpg`;
 }
 
-// Spell icon URLs from Community Dragon (paths match summoner-spells.json iconPath)
-const CD_SPELL = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/data/spells/icons2d";
-const SPELL_ICONS = {
-  1: `${CD_SPELL}/summoner_boost.png`,        // Cleanse
-  3: `${CD_SPELL}/summoner_exhaust.png`,      // Exhaust
-  4: `${CD_SPELL}/summoner_flash.png`,        // Flash
-  6: `${CD_SPELL}/summoner_haste.png`,        // Ghost
-  7: `${CD_SPELL}/summoner_heal.png`,         // Heal
-  11: `${CD_SPELL}/summoner_smite.png`,       // Smite
-  12: `${CD_SPELL}/summoner_teleport.png`,     // Teleport
-  14: `${CD_SPELL}/summoner_ignite.png`,      // Ignite
-  21: `${CD_SPELL}/summoner_barrier.png`,     // Barrier
-  32: `${CD_SPELL}/summoner_mark.png`,        // Mark (ARAM)
-};
+// Spell icons now come from the backend (loaded dynamically from CDN)
 
 function formatTime(secs) {
   if (secs <= 0) return "";
@@ -150,21 +137,20 @@ function renderEnemies(enemies) {
     spellsDiv.className = "spells";
 
     [
-      { id: enemy.spell1Id, name: enemy.spell1Name, cd: enemy.spell1Cooldown, idx: 0 },
-      { id: enemy.spell2Id, name: enemy.spell2Name, cd: enemy.spell2Cooldown, idx: 1 },
+      { id: enemy.spell1Id, name: enemy.spell1Name, icon: enemy.spell1Icon, cd: enemy.spell1Cooldown, idx: 0 },
+      { id: enemy.spell2Id, name: enemy.spell2Name, icon: enemy.spell2Icon, cd: enemy.spell2Cooldown, idx: 1 },
     ].forEach((spell) => {
       const spellDiv = document.createElement("div");
       spellDiv.className = "spell";
       spellDiv.dataset.enemy = idx;
       spellDiv.dataset.spell = spell.idx;
-      const spellKnown = spell.id > 0 && SPELL_ICONS[spell.id];
-      spellDiv.title = spellKnown ? `${spell.name} (${spell.cd}s)` : "?";
+      spellDiv.title = spell.icon ? `${spell.name} (${spell.cd}s)` : "?";
 
       const img = document.createElement("img");
-      if (spellKnown) {
-        img.src = SPELL_ICONS[spell.id];
+      if (spell.icon) {
+        img.src = spell.icon;
         img.alt = spell.name;
-        img.onerror = () => { img.style.display = "none"; };
+        img.onerror = () => { console.error("Failed to load spell icon:", spell.name, spell.icon); img.style.display = "none"; };
       } else {
         img.style.display = "none";
       }
@@ -176,6 +162,11 @@ function renderEnemies(enemies) {
 
       // Click to start/cancel timer
       spellDiv.addEventListener("click", async () => {
+        // Read cooldown from current data (not stale closure)
+        const cur = currentEnemies[idx];
+        const cd = cur ? (spell.idx === 0 ? cur.spell1Cooldown : cur.spell2Cooldown) : spell.cd;
+        if (cd < 10) return; // Ignore if cooldown not loaded yet
+
         const key = timerKey(idx, spell.idx);
         if (timers[key]) {
           // Cancel
@@ -184,11 +175,11 @@ function renderEnemies(enemies) {
         } else {
           // Start
           const now = Math.floor(Date.now() / 1000);
-          startTimer(idx, spell.idx, spell.cd, now);
+          startTimer(idx, spell.idx, cd, now);
           await invoke("send_timer_event", {
             enemyIdx: idx,
             spellIdx: spell.idx,
-            cooldownSecs: spell.cd,
+            cooldownSecs: cd,
           });
         }
       });

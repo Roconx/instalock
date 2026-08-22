@@ -49,7 +49,9 @@ pub struct LcuMonitor {
 
 impl LcuMonitor {
     pub fn new() -> Self {
-        let (event_tx, _) = broadcast::channel(64);
+        // Sized generously: champ select emits a session update on every hover,
+        // ban and timer tick, and a slow receiver that lags loses events.
+        let (event_tx, _) = broadcast::channel(256);
         Self {
             event_tx,
             connected: Arc::new(AtomicBool::new(false)),

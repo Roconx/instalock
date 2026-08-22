@@ -16,7 +16,8 @@ body {
 }
 
 .overlay {
-  background: rgba(14, 14, 26, var(--opacity, 0.8));
+  background: rgba(14, 14, 26, 0.8);
+  opacity: var(--opacity, 0.8);
   border-radius: 10px;
   border: 1px solid transparent;
   transition: border-color 0.2s;
@@ -91,17 +92,17 @@ body {
 .champ-name {
   font-size: 11px;
   color: #7a7a96;
-  width: 65px;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .spells {
   display: flex;
   gap: 6px;
-  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .spell {

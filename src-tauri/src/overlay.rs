@@ -1,7 +1,10 @@
-use instalock_shared::{spell_by_id, spell_cooldown, COSMIC_INSIGHT_ID, UNSEALED_SPELLBOOK_ID};
+use instalock_shared::{SPELLS, COSMIC_INSIGHT_ID, UNSEALED_SPELLBOOK_ID};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+const CD_BASE: &str = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,21 +15,159 @@ pub struct EnemyData {
     pub spell2_id: i32,
     pub spell1_name: String,
     pub spell2_name: String,
+    pub spell1_icon: String,
+    pub spell2_icon: String,
     pub spell1_cooldown: u32,
     pub spell2_cooldown: u32,
     pub has_cosmic_insight: bool,
     pub has_unsealed_spellbook: bool,
 }
 
+/// Dynamic spell data loaded from Community Dragon CDN
+#[derive(Debug, Clone)]
+pub struct SpellData {
+    pub name: String,
+    pub icon_url: String,
+    pub cooldown: u32,
+}
+
+/// Registry of all summoner spells, loaded dynamically from CDN
 #[derive(Default)]
+pub struct SpellRegistry {
+    by_id: HashMap<i32, SpellData>,
+}
+
+impl SpellRegistry {
+    /// Fetch summoner-spells.json from Community Dragon and build the registry
+    pub async fn load() -> Self {
+        let url = format!("{}v1/summoner-spells.json", CD_BASE);
+        log::info!("Loading spell data from CDN...");
+
+        let spells: Vec<serde_json::Value> = match reqwest::get(&url).await {
+            Ok(resp) => match resp.json().await {
+                Ok(data) => data,
+                Err(e) => {
+                    log::error!("Failed to parse summoner-spells.json: {}", e);
+                    return Self::fallback();
+                }
+            },
+            Err(e) => {
+                log::error!("Failed to fetch summoner-spells.json: {}", e);
+                return Self::fallback();
+            }
+        };
+
+        let mut by_id = HashMap::new();
+        for spell in &spells {
+            let Some(id) = spell.get("id").and_then(|v| v.as_i64()) else { continue };
+            let name = spell.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown");
+            let cooldown = spell.get("cooldown").and_then(|v| v.as_u64()).unwrap_or(300) as u32;
+            let icon_path = spell.get("iconPath").and_then(|v| v.as_str()).unwrap_or("");
+
+            // iconPath: "/lol-game-data/assets/DATA/Spells/Icons2D/Summoner_boost.png"
+            // CDN URL:  CD_BASE + "data/spells/icons2d/summoner_boost.png" (lowercase)
+            let icon_url = if let Some(rest) = icon_path.strip_prefix("/lol-game-data/assets/") {
+                format!("{}{}", CD_BASE, rest.to_lowercase())
+            } else {
+                String::new()
+            };
+
+            by_id.insert(id as i32, SpellData {
+                name: name.to_string(),
+                icon_url,
+                cooldown,
+            });
+        }
+
+        log::info!("Loaded {} spells from CDN", by_id.len());
+        for (id, data) in &by_id {
+            log::debug!("Spell {}: {} -> {}", id, data.name, data.icon_url);
+        }
+        Self { by_id }
+    }
+
+    /// Fallback using hardcoded data from instalock-shared
+    fn fallback() -> Self {
+        log::warn!("Using fallback spell data");
+        let mut by_id = HashMap::new();
+        for spell in SPELLS {
+            by_id.insert(spell.id, SpellData {
+                name: spell.name.to_string(),
+                icon_url: String::new(),
+                cooldown: spell.base_cooldown,
+            });
+        }
+        Self { by_id }
+    }
+
+    pub fn get(&self, id: i32) -> Option<&SpellData> {
+        self.by_id.get(&id)
+    }
+
+    /// Match a display name (potentially evolved, e.g. "Unleashed Teleport") to a spell ID
+    pub fn id_from_display_name(&self, display_name: &str) -> i32 {
+        // Hardcoded aliases for evolved/variant spells and ambiguous names
+        let lower = display_name.to_lowercase();
+        let alias = match lower.as_str() {
+            "flash" => Some(4),               // Avoid CDN duplicates (2202/2203 have CD=0)
+            "unleashed teleport" => Some(12),  // TP evolved
+            "hexflash" => Some(4),             // Flash variant (use Flash icon/CD)
+            _ => None,
+        };
+        if let Some(id) = alias {
+            if self.by_id.contains_key(&id) {
+                return id;
+            }
+        }
+
+        // Try exact match first
+        for (&id, spell) in &self.by_id {
+            if spell.name.to_lowercase() == lower {
+                return id;
+            }
+        }
+        // Try contains match (for evolved variants), skip empty names
+        for (&id, spell) in &self.by_id {
+            let sname = spell.name.to_lowercase();
+            if !sname.is_empty() && lower.contains(&sname) {
+                return id;
+            }
+        }
+        log::warn!("Unknown spell display name: '{}'", display_name);
+        0
+    }
+
+    fn spell_name(&self, id: i32) -> String {
+        self.get(id).map(|s| s.name.clone()).unwrap_or_else(|| "Unknown".into())
+    }
+
+    fn spell_icon(&self, id: i32) -> String {
+        self.get(id).map(|s| s.icon_url.clone()).unwrap_or_default()
+    }
+
+    fn spell_cooldown(&self, id: i32, has_cosmic: bool) -> u32 {
+        let base = self.get(id).map(|s| s.cooldown).unwrap_or(300);
+        if has_cosmic {
+            base.saturating_sub(instalock_shared::COSMIC_INSIGHT_REDUCTION)
+        } else {
+            base
+        }
+    }
+}
+
 pub struct OverlayState {
     pub enemies: Mutex<Vec<EnemyData>>,
     pub game_id: Mutex<Option<String>>,
+    pub spells: SpellRegistry,
 }
 
 impl OverlayState {
-    pub fn new() -> Self {
-        Self::default()
+    pub async fn new() -> Self {
+        Self {
+            enemies: Mutex::new(Vec::new()),
+            game_id: Mutex::new(None),
+            spells: SpellRegistry::load().await,
+        }
     }
 }
 
@@ -45,7 +186,8 @@ fn role_order(position: &str) -> u8 {
 /// Extract enemy team data from champ select session JSON
 pub fn extract_enemies(
     session: &serde_json::Value,
-    id_to_name: &std::collections::HashMap<i32, String>,
+    id_to_name: &HashMap<i32, String>,
+    spells: &SpellRegistry,
 ) -> Vec<EnemyData> {
     let Some(their_team) = session.get("theirTeam").and_then(|v| v.as_array()) else {
         return Vec::new();
@@ -75,14 +217,12 @@ pub fn extract_enemies(
             Some((order, EnemyData {
                 champion_id,
                 champion_name,
-                spell1_name: spell_by_id(spell1_id)
-                    .map(|s| s.name.to_string())
-                    .unwrap_or_else(|| "Unknown".into()),
-                spell2_name: spell_by_id(spell2_id)
-                    .map(|s| s.name.to_string())
-                    .unwrap_or_else(|| "Unknown".into()),
-                spell1_cooldown: spell_cooldown(spell1_id, false),
-                spell2_cooldown: spell_cooldown(spell2_id, false),
+                spell1_name: spells.spell_name(spell1_id),
+                spell2_name: spells.spell_name(spell2_id),
+                spell1_icon: spells.spell_icon(spell1_id),
+                spell2_icon: spells.spell_icon(spell2_id),
+                spell1_cooldown: spells.spell_cooldown(spell1_id, false),
+                spell2_cooldown: spells.spell_cooldown(spell2_id, false),
                 spell1_id,
                 spell2_id,
                 has_cosmic_insight: false,
@@ -95,7 +235,7 @@ pub fn extract_enemies(
     enemies.into_iter().map(|(_, e)| e).collect()
 }
 
-/// Poll the Live Client Data API to detect runes for enemies
+/// Poll the Live Client Data API to detect runes and spells for enemies
 pub async fn poll_live_client_runes(overlay_state: Arc<OverlayState>) {
     let client = match reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -127,7 +267,7 @@ pub async fn poll_live_client_runes(overlay_state: Arc<OverlayState>) {
             continue;
         };
 
-        // Find active player's team by matching summoner name in allPlayers
+        // Find active player's team
         let active_name = data
             .get("activePlayer")
             .and_then(|p| p.get("riotIdGameName"))
@@ -148,28 +288,21 @@ pub async fn poll_live_client_runes(overlay_state: Arc<OverlayState>) {
             .and_then(|t| t.as_str())
             .unwrap_or("ORDER");
 
-        let enemy_team = if active_team == "ORDER" {
-            "CHAOS"
-        } else {
-            "ORDER"
-        };
+        let enemy_team = if active_team == "ORDER" { "CHAOS" } else { "ORDER" };
 
         let mut enemies = overlay_state.enemies.lock().await;
+        let spells = &overlay_state.spells;
 
-        // Collect enemy players from Live Client Data
-        let mut live_enemies: Vec<&serde_json::Value> = Vec::new();
-        for player in all_players {
-            let team = player.get("team").and_then(|t| t.as_str()).unwrap_or("");
-            if team == enemy_team {
-                live_enemies.push(player);
-            }
-        }
+        let live_enemies: Vec<&serde_json::Value> = all_players
+            .iter()
+            .filter(|p| p.get("team").and_then(|t| t.as_str()).unwrap_or("") == enemy_team)
+            .collect();
 
         if live_enemies.is_empty() {
             continue;
         }
 
-        // Log raw enemy data for debugging
+        // Log raw enemy data
         for player in &live_enemies {
             let name = player.get("championName").and_then(|n| n.as_str()).unwrap_or("?");
             let pos = player.get("position").and_then(|n| n.as_str()).unwrap_or("?");
@@ -180,30 +313,19 @@ pub async fn poll_live_client_runes(overlay_state: Arc<OverlayState>) {
             log::info!("LiveClient enemy: {} [{}] spells: {}, {}", name, pos, s1, s2);
         }
 
-        // If enemies list is empty (e.g. practice tool, no champ select data),
-        // populate it from the Live Client Data API
         if enemies.is_empty() {
+            // Populate from Live Client Data (e.g. practice tool, no champ select)
             for player in &live_enemies {
-                let champ_name = player
-                    .get("championName")
-                    .and_then(|n| n.as_str())
-                    .unwrap_or("Unknown")
-                    .to_string();
+                let champ_name = player.get("championName")
+                    .and_then(|n| n.as_str()).unwrap_or("Unknown").to_string();
 
-                // Live Client Data uses summonerSpells.summonerSpellOne/Two
-                let spell1_id = player
-                    .pointer("/summonerSpells/summonerSpellOne/rawDescription")
-                    .and_then(|_| player.pointer("/summonerSpells/summonerSpellOne/displayName"))
-                    .and_then(|n| n.as_str())
-                    .map(spell_id_from_display_name)
-                    .unwrap_or(4); // default Flash
+                let spell1_display = player.pointer("/summonerSpells/summonerSpellOne/displayName")
+                    .and_then(|n| n.as_str()).unwrap_or("");
+                let spell2_display = player.pointer("/summonerSpells/summonerSpellTwo/displayName")
+                    .and_then(|n| n.as_str()).unwrap_or("");
 
-                let spell2_id = player
-                    .pointer("/summonerSpells/summonerSpellTwo/rawDescription")
-                    .and_then(|_| player.pointer("/summonerSpells/summonerSpellTwo/displayName"))
-                    .and_then(|n| n.as_str())
-                    .map(spell_id_from_display_name)
-                    .unwrap_or(14); // default Ignite
+                let spell1_id = if spell1_display.is_empty() { 0 } else { spells.id_from_display_name(spell1_display) };
+                let spell2_id = if spell2_display.is_empty() { 0 } else { spells.id_from_display_name(spell2_display) };
 
                 let has_cosmic = has_rune(player, COSMIC_INSIGHT_ID);
                 let has_spellbook = has_rune(player, UNSEALED_SPELLBOOK_ID);
@@ -211,45 +333,23 @@ pub async fn poll_live_client_runes(overlay_state: Arc<OverlayState>) {
                 enemies.push(EnemyData {
                     champion_id: 0,
                     champion_name: champ_name,
-                    spell1_name: spell_by_id(spell1_id)
-                        .map(|s| s.name.to_string())
-                        .unwrap_or_else(|| "Unknown".into()),
-                    spell2_name: spell_by_id(spell2_id)
-                        .map(|s| s.name.to_string())
-                        .unwrap_or_else(|| "Unknown".into()),
-                    spell1_cooldown: spell_cooldown(spell1_id, has_cosmic),
-                    spell2_cooldown: spell_cooldown(spell2_id, has_cosmic),
+                    spell1_name: spell1_display.to_string(),
+                    spell2_name: spell2_display.to_string(),
+                    spell1_icon: spells.spell_icon(spell1_id),
+                    spell2_icon: spells.spell_icon(spell2_id),
+                    spell1_cooldown: spells.spell_cooldown(spell1_id, has_cosmic),
+                    spell2_cooldown: spells.spell_cooldown(spell2_id, has_cosmic),
                     spell1_id,
                     spell2_id,
                     has_cosmic_insight: has_cosmic,
                     has_unsealed_spellbook: has_spellbook,
                 });
             }
-
-            // Sort by role
-            let positions: Vec<(String, u8)> = live_enemies
-                .iter()
-                .map(|p| {
-                    let name = p.get("championName").and_then(|n| n.as_str()).unwrap_or("");
-                    let pos = p.get("position").and_then(|n| n.as_str()).unwrap_or("");
-                    (name.to_string(), role_order(pos))
-                })
-                .collect();
-
-            enemies.sort_by_key(|e| {
-                positions
-                    .iter()
-                    .find(|(name, _)| *name == e.champion_name)
-                    .map(|(_, order)| *order)
-                    .unwrap_or(5)
-            });
         } else {
-            // Update existing enemies with rune data + spell IDs from Live Client Data
+            // Update existing enemies with spells + runes from Live Client Data
             for player in &live_enemies {
-                let champ_name = player
-                    .get("championName")
-                    .and_then(|n| n.as_str())
-                    .unwrap_or("");
+                let champ_name = player.get("championName")
+                    .and_then(|n| n.as_str()).unwrap_or("");
 
                 if let Some(enemy) = enemies.iter_mut().find(|e| e.champion_name == champ_name) {
                     let has_cosmic = has_rune(player, COSMIC_INSIGHT_ID);
@@ -259,73 +359,47 @@ pub async fn poll_live_client_runes(overlay_state: Arc<OverlayState>) {
                     enemy.has_unsealed_spellbook = has_spellbook;
 
                     // Update spell IDs from Live Client Data (champ select may have 0s)
-                    if let Some(spell1_name) = player
-                        .pointer("/summonerSpells/summonerSpellOne/displayName")
+                    if let Some(display_name) = player.pointer("/summonerSpells/summonerSpellOne/displayName")
                         .and_then(|n| n.as_str())
                     {
-                        let id = spell_id_from_display_name(spell1_name);
+                        let id = spells.id_from_display_name(display_name);
                         enemy.spell1_id = id;
-                        enemy.spell1_name = spell_by_id(id)
-                            .map(|s| s.name.to_string())
-                            .unwrap_or_else(|| spell1_name.to_string());
+                        enemy.spell1_name = display_name.to_string();
+                        enemy.spell1_icon = spells.spell_icon(id);
                     }
-                    if let Some(spell2_name) = player
-                        .pointer("/summonerSpells/summonerSpellTwo/displayName")
+                    if let Some(display_name) = player.pointer("/summonerSpells/summonerSpellTwo/displayName")
                         .and_then(|n| n.as_str())
                     {
-                        let id = spell_id_from_display_name(spell2_name);
+                        let id = spells.id_from_display_name(display_name);
                         enemy.spell2_id = id;
-                        enemy.spell2_name = spell_by_id(id)
-                            .map(|s| s.name.to_string())
-                            .unwrap_or_else(|| spell2_name.to_string());
+                        enemy.spell2_name = display_name.to_string();
+                        enemy.spell2_icon = spells.spell_icon(id);
                     }
 
-                    enemy.spell1_cooldown = spell_cooldown(enemy.spell1_id, has_cosmic);
-                    enemy.spell2_cooldown = spell_cooldown(enemy.spell2_id, has_cosmic);
+                    enemy.spell1_cooldown = spells.spell_cooldown(enemy.spell1_id, has_cosmic);
+                    enemy.spell2_cooldown = spells.spell_cooldown(enemy.spell2_id, has_cosmic);
                 }
             }
-
-            // Sort by role using Live Client Data position
-            let positions: Vec<(String, u8)> = live_enemies
-                .iter()
-                .map(|p| {
-                    let name = p.get("championName").and_then(|n| n.as_str()).unwrap_or("");
-                    let pos = p.get("position").and_then(|n| n.as_str()).unwrap_or("");
-                    (name.to_string(), role_order(pos))
-                })
-                .collect();
-
-            enemies.sort_by_key(|e| {
-                positions
-                    .iter()
-                    .find(|(name, _)| *name == e.champion_name)
-                    .map(|(_, order)| *order)
-                    .unwrap_or(5)
-            });
         }
 
-        // Successfully parsed — done polling
+        // Sort by role
+        let positions: Vec<(String, u8)> = live_enemies
+            .iter()
+            .map(|p| {
+                let name = p.get("championName").and_then(|n| n.as_str()).unwrap_or("");
+                let pos = p.get("position").and_then(|n| n.as_str()).unwrap_or("");
+                (name.to_string(), role_order(pos))
+            })
+            .collect();
+
+        enemies.sort_by_key(|e| {
+            positions.iter()
+                .find(|(name, _)| *name == e.champion_name)
+                .map(|(_, order)| *order)
+                .unwrap_or(5)
+        });
+
         return;
-    }
-}
-
-/// Map Live Client Data API display name to spell ID
-fn spell_id_from_display_name(name: &str) -> i32 {
-    match name {
-        "Flash" => 4,
-        "Heal" => 7,
-        "Ghost" => 6,
-        "Barrier" => 21,
-        "Exhaust" => 3,
-        "Ignite" => 14,
-        "Cleanse" => 1,
-        "Teleport" => 12,
-        "Smite" => 11,
-        "Mark" => 32,
-        _ => {
-            log::warn!("Unknown spell display name: '{}' — defaulting to 0", name);
-            0
-        }
     }
 }
 
@@ -335,14 +409,12 @@ fn has_rune(player: &serde_json::Value, rune_id: i32) -> bool {
         None => return false,
     };
 
-    // Check keystone
     if let Some(keystone) = runes.get("keystone").and_then(|k| k.get("id")) {
         if keystone.as_i64() == Some(rune_id as i64) {
             return true;
         }
     }
 
-    // Check general runes
     if let Some(general) = runes.get("generalRunes").and_then(|g| g.as_array()) {
         for rune in general {
             if let Some(id) = rune.get("id").and_then(|i| i.as_i64()) {

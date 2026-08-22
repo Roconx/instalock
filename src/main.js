@@ -133,13 +133,9 @@ function updateCardBodyStates() {
       body.classList.toggle("disabled", !checkbox.checked);
     }
   });
-  // Bravery disabled when auto pick is OFF
+  // Bravery disabled when auto pick is OFF. It only applies to Arena, so the
+  // champion input stays visible: it is what gets picked in every other mode.
   braveryEnabled.disabled = !autoPick.checked;
-  // Hide champion input entirely when bravery active (keeps card height consistent)
-  const pickBody = document.querySelector('.card-body[data-toggle="autoPick"]');
-  if (pickBody) {
-    pickBody.hidden = braveryEnabled.checked && autoPick.checked;
-  }
 }
 
 // Settings view toggle
@@ -192,15 +188,6 @@ async function init() {
   setupAutocomplete(pickChampion, pickDropdown);
   setupAutocomplete(banChampion, banDropdown);
 
-  // Typing a champion disables bravery
-  pickChampion.addEventListener("input", () => {
-    if (pickChampion.value.trim() && braveryEnabled.checked) {
-      braveryEnabled.checked = false;
-      updateCardBodyStates();
-      saveSettingsDebounced();
-    }
-  });
-
   // Load champions with retry
   await loadChampionsWithRetry();
 
@@ -218,9 +205,6 @@ async function init() {
     saveSettingsDebounced();
   });
   braveryEnabled.addEventListener("change", () => {
-    if (braveryEnabled.checked) {
-      pickChampion.value = "";
-    }
     updateCardBodyStates();
     saveSettingsDebounced();
   });
@@ -299,8 +283,6 @@ function applySettings(s) {
   actionMarginValue.textContent = formatDelay(actionMargin.value);
 
   // Overlay settings
-  _overlayX = s.overlayX ?? null;
-  _overlayY = s.overlayY ?? null;
   const overlayEnabled = document.getElementById("overlayEnabled");
   if (overlayEnabled) overlayEnabled.checked = s.overlayEnabled !== false;
   const overlayOpacity = document.getElementById("overlayOpacity");
@@ -319,10 +301,6 @@ function applySettings(s) {
   updateCardBodyStates();
 }
 
-// Cache overlay position from last backend read so we don't lose it on save
-let _overlayX = null;
-let _overlayY = null;
-
 function collectSettings() {
   const restoreFocusEl = document.getElementById("restoreFocus");
   return {
@@ -340,8 +318,6 @@ function collectSettings() {
     actionMarginSecs: parseFloat(actionMargin.value) || 1.5,
     overlayEnabled: document.getElementById("overlayEnabled")?.checked ?? true,
     overlayOpacity: parseFloat(document.getElementById("overlayOpacity")?.value) || 0.8,
-    overlayX: _overlayX,
-    overlayY: _overlayY,
     syncEnabled: document.getElementById("syncEnabled")?.checked || false,
     syncServerUrl: document.getElementById("syncServerUrl")?.value?.trim() || "ws://localhost:9876",
   };
