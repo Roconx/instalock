@@ -82,7 +82,10 @@ impl Default for Settings {
             auto_pick: false,
             auto_ban: false,
             pick_champion: String::new(),
-            ban_champion: String::new(),
+            // Pre-filled so enabling Auto Ban does something useful straight
+            // away. Exact spelling from champion-summary.json (ASCII
+            // apostrophe), which is what resolve_id normalizes against.
+            ban_champion: "K'Sante".to_string(),
             bravery_enabled: false,
             hover_pick: false,
             restore_focus_after_action: true,
