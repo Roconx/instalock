@@ -46,7 +46,6 @@ Cargo workspace with three members:
 | `focus.rs` | Restores window focus after an action steals it |
 | `hotkey.rs` | Shift-key polling that toggles overlay click-through |
 | `launcher.rs` | Finds and starts the League client |
-| `appearance.rs` | Stores the custom background image beside `settings.json` |
 
 ### Frontend (`src/`)
 
@@ -83,8 +82,9 @@ Any new window API called from JS needs its permission added to
 See the **`instalock-ui` skill** before changing anything under `src/`. In short:
 
 - Never write a colour literal outside `tokens.css`; use `var(--…)`.
-- Every surface that reads as a panel gets `var(--bg-panel)` +
-  `backdrop-filter: blur(var(--bg-panel-blur))`.
+- Every surface that reads as a panel gets `background: var(--bg-panel)`. Its
+  alpha is user-tunable (Aparença → Contrast dels panells), so a panel must
+  never hardcode its own background.
 - Both themes must work — check `[data-theme="light"]`, not just dark.
 
 ## Settings

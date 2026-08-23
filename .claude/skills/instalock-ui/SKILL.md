@@ -11,7 +11,7 @@ TypeScript, no CSS framework. Keep it that way.
 
 The visual language is modelled on
 [Blur-AutoClicker](https://github.com/Blur009/Blur-AutoClicker): frameless
-window, custom titlebar with icon tabs, glassmorphism panels, a statusbar, and a
+window, custom titlebar with icon tabs, layered panel surfaces, a statusbar, and a
 green accent that lights up when the client is connected.
 
 ## The one rule
@@ -49,23 +49,26 @@ user's accent.
 | `--border` / `--border-strong` | Hairlines, hover borders, scrollbar thumbs |
 | `--text-primary` / `--text-muted` / `--text-dim` / `--text-faint` | Four-step text ramp |
 | `--text-on-accent` | Text sitting on `--accent-strong` (flips per theme) |
-| `--r-sm` / `--r-md` / `--r-lg` | 4px controls / 8px panels / 16px window |
+| `--r-sm` / `--r-md` | 4px controls / 8px panels |
 | `--fs-small` … `--fs-large`, `--fw-light/medium/heavy` | Type scale |
 
-Three tokens are **live-tuned by the user** from the Aparença tab — never
-hardcode over them: `--bg-panel-blur`, `--bg-image-blur`, `--panel-opacity`.
+`--panel-opacity` is **live-tuned by the user** from the Aparença tab (Contrast
+dels panells) — never hardcode over it.
 
 ## Panels
 
-A panel surface is just `background: var(--bg-panel)`. The glass blur is **not**
-declared per rule — it lives in one block gated on `html.has-bg`, because
-without a background image `backdrop-filter` blurs a flat colour: no visual
-gain, a compositing layer per panel, and softer edges on every rounded corner.
-Add new panel selectors to that block, don't inline the filter.
+A panel surface is `background: var(--bg-panel)`, nothing else. That token is
+`rgba(var(--panel-rgb), var(--panel-opacity))`, so a panel that sets its own
+background opts out of the user's contrast setting and of the light theme at
+once.
 
-The background image lives on `.app-root::before` at `z-index: 0`. Anything that
-must sit above it needs `position: relative` and `z-index: 1` (panels) or `2`
-(titlebar, statusbar).
+There is deliberately **no `backdrop-filter` anywhere**. It was there for a
+background-image feature that has since been removed; over a flat colour it
+buys nothing and costs a compositing layer per panel plus softer edges on every
+rounded corner.
+
+`.panel-area` children need `position: relative` and `z-index: 1`; the titlebar
+and statusbar sit at `2`.
 
 ## The window corner is not yours
 

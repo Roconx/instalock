@@ -43,10 +43,6 @@ pub struct Settings {
     // earlier versions keep loading without a migration step.
     #[serde(default = "default_theme")]
     pub theme: String,
-    #[serde(default)]
-    pub bg_blur: f64,
-    #[serde(default = "default_panel_blur")]
-    pub panel_blur: f64,
     #[serde(default = "default_panel_opacity")]
     pub panel_opacity: f64,
     #[serde(default)]
@@ -75,10 +71,6 @@ fn default_theme() -> String {
     "dark".to_string()
 }
 
-fn default_panel_blur() -> f64 {
-    12.0
-}
-
 fn default_panel_opacity() -> f64 {
     0.55
 }
@@ -105,8 +97,6 @@ impl Default for Settings {
             sync_enabled: false,
             sync_server_url: default_server_url(),
             theme: default_theme(),
-            bg_blur: 0.0,
-            panel_blur: default_panel_blur(),
             panel_opacity: default_panel_opacity(),
             always_on_top: false,
             minimize_to_tray: true,
@@ -114,8 +104,8 @@ impl Default for Settings {
     }
 }
 
-/// Directory holding settings.json and the background image.
-pub fn config_dir() -> PathBuf {
+/// Directory holding settings.json.
+fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("instalock")

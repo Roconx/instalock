@@ -74,20 +74,17 @@
   --fw-light: 400;
   --fw-medium: 600;
   --fw-heavy: 800;
-  --fs-small: 0.6875rem;   /* 11px */
-  --fs-medium: 0.75rem;    /* 12px */
-  --fs-normal: 0.8125rem;  /* 13px */
-  --fs-large: 1rem;        /* 16px */
+  --fs-small: 0.75rem;     /* 12px */
+  --fs-medium: 0.8125rem;  /* 13px */
+  --fs-normal: 0.9375rem;  /* 15px */
+  --fs-large: 1.125rem;    /* 18px */
 
   /* ── Radii ──
      The window corner is not here: DWM rounds it natively (main.rs). */
   --r-sm: 0.25rem;
   --r-md: 0.5rem;
 
-  /* ── Effects (live-tuned from Aparença) ── */
-  --bg-panel-blur: 12px;
-  --bg-image-blur: 0px;
-  --bg-image: none;
+  /* ── Effects ── */
   --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 

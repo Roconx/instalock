@@ -42,17 +42,11 @@ const tbClose = document.getElementById("tbClose");
 
 // Appearance
 const themeSegmented = document.getElementById("themeSegmented");
-const bgPick = document.getElementById("bgPick");
-const bgClear = document.getElementById("bgClear");
-const bgFile = document.getElementById("bgFile");
-const bgBlur = document.getElementById("bgBlur");
-const bgBlurValue = document.getElementById("bgBlurValue");
-const panelBlur = document.getElementById("panelBlur");
-const panelBlurValue = document.getElementById("panelBlurValue");
 const panelOpacity = document.getElementById("panelOpacity");
 const panelOpacityValue = document.getElementById("panelOpacityValue");
 const alwaysOnTop = document.getElementById("alwaysOnTop");
 const minimizeToTray = document.getElementById("minimizeToTray");
+const appearanceReset = document.getElementById("appearanceReset");
 
 // Tabs
 const views = {
@@ -139,15 +133,20 @@ function setupAutocomplete(input, dropdown) {
   // Reflect the current value: avatar, clear button, and whether the typed name
   // actually resolves to a champion (a typo would otherwise fail silently at
   // pick time, with nothing in the UI to explain it).
-  function refresh() {
+  //
+  // `strict` is for when the user is done with the field. Mid-typing, "Kar" is
+  // not yet a champion but is on its way to one, so only a query that matches
+  // nothing at all is worth flagging.
+  function refresh({ strict = false } = {}) {
     const value = input.value.trim();
     const champ = findChampion(value);
     wrapper.classList.toggle("filled", value.length > 0);
-    // Don't flag as invalid while the list is still loading.
-    wrapper.classList.toggle(
-      "invalid",
-      value.length > 0 && champOptions.length > 0 && !champ
-    );
+
+    // Don't flag anything while the champion list is still loading.
+    const known = champOptions.length > 0;
+    const bad = strict ? !champ : rankChampions(value).length === 0;
+    wrapper.classList.toggle("invalid", value.length > 0 && known && bad);
+
     avatar.style.backgroundImage = champ ? `url("${championIconUrl(champ.id)}")` : "";
   }
 
@@ -226,7 +225,7 @@ function setupAutocomplete(input, dropdown) {
 
   input.addEventListener("blur", () => {
     setTimeout(() => dropdown.classList.remove("open"), 150);
-    refresh();
+    refresh({ strict: true });
   });
 
   clearBtn.addEventListener("click", () => {
@@ -276,8 +275,10 @@ function setupAutocomplete(input, dropdown) {
     options[activeIdx].scrollIntoView({ block: "nearest" });
   });
 
-  // Re-run when the champion list finally arrives
-  input.addEventListener("champions-ready", refresh);
+  // Re-run when the champion list finally arrives. Strict here: the value came
+  // from settings.json, so a name that no longer resolves should show as broken
+  // rather than sit there looking fine and silently never picking.
+  input.addEventListener("champions-ready", () => refresh({ strict: true }));
   refresh();
 }
 
@@ -317,25 +318,19 @@ function applyTheme(theme) {
   });
 }
 
-function applyBackground(dataUri) {
-  document.documentElement.style.setProperty(
-    "--bg-image",
-    dataUri ? `url("${dataUri}")` : "none"
-  );
-  // Gates the backdrop-filter rules: no image, no glass, no wasted layers
-  document.documentElement.classList.toggle("has-bg", !!dataUri);
-}
+// Appearance defaults — must match Settings::default() in settings.rs
+const APPEARANCE_DEFAULTS = {
+  theme: "dark",
+  panelOpacity: 0.55,
+  alwaysOnTop: false,
+};
 
-function applyBgBlur(px) {
-  bgBlur.value = px;
-  bgBlurValue.textContent = `${Math.round(px)}px`;
-  document.documentElement.style.setProperty("--bg-image-blur", `${px}px`);
-}
-
-function applyPanelBlur(px) {
-  panelBlur.value = px;
-  panelBlurValue.textContent = `${Math.round(px)}px`;
-  document.documentElement.style.setProperty("--bg-panel-blur", `${px}px`);
+async function resetAppearance() {
+  applyTheme(APPEARANCE_DEFAULTS.theme);
+  applyPanelOpacity(APPEARANCE_DEFAULTS.panelOpacity);
+  applyAlwaysOnTop(APPEARANCE_DEFAULTS.alwaysOnTop);
+  await flushSettings();
+  addLog("Aparença restablerta");
 }
 
 function applyPanelOpacity(op) {
@@ -356,9 +351,6 @@ async function init() {
   // Load initial data
   const settings = await invoke("get_settings");
   applySettings(settings);
-
-  // Background image lives next to settings.json, not inside it
-  applyBackground(await invoke("get_background"));
 
   const connected = await invoke("is_lcu_connected");
   setConnected(connected);
@@ -516,36 +508,6 @@ function setupAppearanceControls() {
     });
   });
 
-  bgPick.addEventListener("click", () => bgFile.click());
-
-  bgFile.addEventListener("change", () => {
-    const file = bgFile.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      applyBackground(reader.result);
-      await invoke("save_background", { dataUri: reader.result });
-    };
-    reader.readAsDataURL(file);
-    // Reset so re-picking the same file still fires a change event
-    bgFile.value = "";
-  });
-
-  bgClear.addEventListener("click", async () => {
-    applyBackground(null);
-    await invoke("clear_background");
-  });
-
-  bgBlur.addEventListener("input", () => {
-    applyBgBlur(bgBlur.value);
-    saveSettingsDebounced();
-  });
-
-  panelBlur.addEventListener("input", () => {
-    applyPanelBlur(panelBlur.value);
-    saveSettingsDebounced();
-  });
-
   panelOpacity.addEventListener("input", () => {
     applyPanelOpacity(panelOpacity.value);
     saveSettingsDebounced();
@@ -555,6 +517,8 @@ function setupAppearanceControls() {
     applyAlwaysOnTop(alwaysOnTop.checked);
     saveSettingsDebounced();
   });
+
+  appearanceReset.addEventListener("click", resetAppearance);
 }
 
 function applySettings(s) {
@@ -602,8 +566,6 @@ function applySettings(s) {
 
   // Appearance
   applyTheme(s.theme === "light" ? "light" : "dark");
-  applyBgBlur(s.bgBlur ?? 0);
-  applyPanelBlur(s.panelBlur ?? 12);
   applyPanelOpacity(s.panelOpacity ?? 0.55);
   applyAlwaysOnTop(s.alwaysOnTop || false);
   minimizeToTray.checked = s.minimizeToTray !== false;
@@ -631,8 +593,6 @@ function collectSettings() {
     syncEnabled: document.getElementById("syncEnabled")?.checked || false,
     syncServerUrl: document.getElementById("syncServerUrl")?.value?.trim() || "ws://localhost:9876",
     theme: document.documentElement.dataset.theme === "light" ? "light" : "dark",
-    bgBlur: parseFloat(bgBlur.value) || 0,
-    panelBlur: parseFloat(panelBlur.value) || 0,
     panelOpacity: parseFloat(panelOpacity.value) || 0.55,
     alwaysOnTop: alwaysOnTop.checked,
     minimizeToTray: minimizeToTray.checked,

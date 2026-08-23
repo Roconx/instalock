@@ -233,38 +233,10 @@
         </div>
 
         <div class="settings-section">
-          <div class="settings-section-title">Fons</div>
-          <div class="settings-list">
-            <div class="settings-item">
-              <span class="settings-item-label">Imatge de fons</span>
-              <div class="btn-row">
-                <button class="btn-sm" id="bgPick">Escollir…</button>
-                <button class="btn-sm danger" id="bgClear">Treure</button>
-              </div>
-              <input type="file" id="bgFile" accept="image/*" hidden>
-            </div>
-            <div class="settings-item">
-              <span class="settings-item-label">Difuminat del fons</span>
-              <div class="slider-control">
-                <input type="range" class="delay-slider" id="bgBlur" min="0" max="40" step="1" value="0">
-                <span class="delay-value" id="bgBlurValue">0px</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="settings-section">
           <div class="settings-section-title">Panells</div>
           <div class="settings-list">
             <div class="settings-item">
-              <span class="settings-item-label">Difuminat dels panells</span>
-              <div class="slider-control">
-                <input type="range" class="delay-slider" id="panelBlur" min="0" max="30" step="1" value="12">
-                <span class="delay-value" id="panelBlurValue">12px</span>
-              </div>
-            </div>
-            <div class="settings-item">
-              <span class="settings-item-label">Opacitat dels panells</span>
+              <span class="settings-item-label">Contrast dels panells</span>
               <div class="slider-control">
                 <input type="range" class="delay-slider" id="panelOpacity" min="0.2" max="1" step="0.05" value="0.55">
                 <span class="delay-value" id="panelOpacityValue">0.55</span>
@@ -280,6 +252,18 @@
               <span class="settings-item-label">Sempre a davant</span>
               <input type="checkbox" id="alwaysOnTop">
             </label>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-list">
+            <div class="settings-item">
+              <span class="settings-item-label">
+                Restablir l'aparença
+                <span class="settings-item-hint">Tema, contrast dels panells i sempre a davant</span>
+              </span>
+              <button class="btn-sm danger" id="appearanceReset" type="button">Per defecte</button>
+            </div>
           </div>
         </div>
       </div>

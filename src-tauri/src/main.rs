@@ -2,7 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod actions;
-mod appearance;
 mod champions;
 mod focus;
 mod hotkey;
@@ -400,9 +399,6 @@ fn main() {
             save_overlay_position,
             send_timer_event,
             cancel_timer_event,
-            appearance::save_background,
-            appearance::get_background,
-            appearance::clear_background,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
