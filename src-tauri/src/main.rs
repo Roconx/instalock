@@ -2,9 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod actions;
+mod appearance;
 mod champions;
 mod focus;
 mod hotkey;
+mod launcher;
 mod lcu;
 mod overlay;
 mod settings;
@@ -51,6 +53,10 @@ fn update_settings(
     let overlay_on = settings.overlay_enabled;
     let opacity_changed = (settings.overlay_opacity - old.overlay_opacity).abs() > 0.001;
     let opacity = settings.overlay_opacity;
+    let theme_changed = settings.theme != old.theme;
+    let theme = settings.theme.clone();
+    let pin_changed = settings.always_on_top != old.always_on_top;
+    let pinned = settings.always_on_top;
 
     // Preserve overlay position (managed by save_overlay_position, not the frontend)
     let mut settings = settings;
@@ -66,6 +72,19 @@ fn update_settings(
 
     if opacity_changed {
         let _ = app.emit("overlay-opacity", opacity);
+    }
+
+    // The overlay is a separate document, so it needs the theme pushed to it.
+    if theme_changed {
+        let _ = app.emit("theme", theme);
+    }
+
+    // The frontend already calls setAlwaysOnTop; mirroring it here keeps the
+    // window right when the setting is changed from anywhere else.
+    if pin_changed {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.set_always_on_top(pinned);
+        }
     }
 
     if overlay_changed {
@@ -102,12 +121,50 @@ fn get_champions(state: tauri::State<'_, Arc<AppState>>) -> Vec<String> {
     state.champions.get_names()
 }
 
+/// Champion names paired with their ids, so the picker can show icons.
+#[tauri::command]
+fn get_champion_options(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Vec<champions::ChampionOption> {
+    state.champions.get_entries()
+}
+
 #[tauri::command]
 fn is_lcu_connected(state: tauri::State<'_, Arc<AppState>>) -> bool {
     state
         .lcu_monitor
         .connected
         .load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Start the League client. The button that calls this is only shown while the
+/// LCU is disconnected, but a second call is harmless: the Riot Client just
+/// focuses the session it already has.
+#[tauri::command]
+async fn launch_league(app: tauri::AppHandle) -> Result<(), String> {
+    // Reads files and spawns a process - keep it off the async worker.
+    let result = tokio::task::spawn_blocking(launcher::launch_league)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    match &result {
+        Ok(_) => {
+            let _ = app.emit("log", "Obrint League of Legends...");
+        }
+        Err(e) => {
+            log::error!("Launch failed: {}", e);
+            let _ = app.emit("log", &format!("Error obrint LoL: {}", e));
+        }
+    }
+
+    result
+}
+
+/// Whether we can offer to launch League at all - the button stays hidden on a
+/// machine where the Riot Client isn't installed.
+#[tauri::command]
+fn can_launch_league() -> bool {
+    launcher::riot_client_path().is_some()
 }
 
 #[tauri::command]
@@ -230,6 +287,81 @@ fn setup_file_logger() {
     log::info!("Log file: {}", log_path.display());
 }
 
+/// System tray. Left click restores the window; the menu offers open and a real
+/// quit, which is the only way out once minimize-to-tray is on.
+fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let open_item = MenuItem::with_id(app, "open", "Obrir InstaLock", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Sortir", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+
+    let mut builder = TrayIconBuilder::with_id("instalock-tray")
+        .tooltip("InstaLock")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => restore_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                restore_main_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+
+    builder.build(app)?;
+    Ok(())
+}
+
+/// Ask DWM to round the window and give it a real drop shadow.
+///
+/// Drawing the corner ourselves (border-radius on a transparent window) looked
+/// wrong: the webview antialiases against an empty surface and the outward
+/// box-shadow has nowhere to go but into the corner it just cut out, leaving a
+/// grey smear around a soft curve. Letting the compositor own the shape gives
+/// the same crisp corner as every other Windows 11 window.
+#[cfg(windows)]
+fn apply_native_rounding(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+
+    let Ok(hwnd) = window.hwnd() else { return };
+    let pref: i32 = DWMWCP_ROUND;
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd.0 as HWND,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            &pref as *const i32 as *const std::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn apply_native_rounding(_window: &tauri::WebviewWindow) {}
+
+fn restore_main_window(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
 fn main() {
     setup_file_logger();
 
@@ -258,25 +390,54 @@ fn main() {
             get_settings,
             update_settings,
             get_champions,
+            get_champion_options,
             is_lcu_connected,
+            launch_league,
+            can_launch_league,
             get_autostart,
             set_autostart,
             get_overlay_data,
             save_overlay_position,
             send_timer_event,
             cancel_timer_event,
+            appearance::save_background,
+            appearance::get_background,
+            appearance::clear_background,
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
-                    // Close overlay when main window is closed
-                    close_overlay_window(window.app_handle());
+                    let app = window.app_handle();
+                    let to_tray = app
+                        .state::<Arc<AppState>>()
+                        .settings_manager
+                        .get()
+                        .minimize_to_tray;
+                    if to_tray {
+                        // Keep running in the tray instead of exiting.
+                        api.prevent_close();
+                        let _ = window.hide();
+                    } else {
+                        // Close overlay when main window is closed
+                        close_overlay_window(app);
+                    }
                 }
             }
         })
         .setup(move |app| {
             let app_handle = app.handle().clone();
             let state = app_state.clone();
+
+            setup_tray(app.handle())?;
+
+            // Restore the always-on-top preference before the window is shown.
+            {
+                let s = app.state::<Arc<AppState>>().settings_manager.get();
+                if let Some(main_win) = app.get_webview_window("main") {
+                    let _ = main_win.set_always_on_top(s.always_on_top);
+                    apply_native_rounding(&main_win);
+                }
+            }
 
             // Poll Shift key state: hold to interact with overlay, release to click-through
             let ah_shortcut = app.handle().clone();

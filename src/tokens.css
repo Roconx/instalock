@@ -1,0 +1,115 @@
+/* ────────────────────────────────────────────────────────────
+   Design tokens — shared by the main window and the overlay.
+   Colour literals live here and nowhere else: every other rule
+   in style.css / overlay.css consumes a var() from this file.
+   ──────────────────────────────────────────────────────────── */
+
+/* Roboto Flex, bundled locally — the app runs offline, so no CDN link.
+   These are the latin and latin-ext subsets of the variable font; Catalan
+   sits entirely inside latin, latin-ext is there for stray glyphs.
+   font-stretch must be declared: Roboto Flex carries a wdth axis, and
+   without it the browser won't match the face. */
+@font-face {
+  font-family: 'Roboto Flex';
+  font-style: normal;
+  font-weight: 100 1000;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url('assets/RobotoFlex-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Roboto Flex';
+  font-style: normal;
+  font-weight: 100 1000;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url('assets/RobotoFlex-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  /* ── Accent ── */
+  --accent-rgb:    25, 194, 51;
+  --accent:        rgba(var(--accent-rgb), 0.55);
+  --accent-strong: rgb(var(--accent-rgb));
+  --accent-soft:   rgba(var(--accent-rgb), 0.14);
+  --accent-glow:   rgba(var(--accent-rgb), 0.35);
+
+  --danger:        rgb(224, 49, 49);
+  --danger-soft:   rgba(224, 49, 49, 0.14);
+  --warning:       rgb(255, 146, 60);
+
+  /* ── Surfaces ──
+     --panel-opacity is driven from Aparença; --panel-rgb flips per theme.
+     --panel-rgb is deliberately well above --bg-base: at 0.55 alpha the panel
+     lands ~20 levels lighter than the window, which is what makes a card read
+     as a surface. Lower it and the cards dissolve into the background. */
+  --panel-rgb:      48, 48, 56;
+  --panel-opacity:  0.55;
+  --bg-base:        rgb(12, 12, 14);
+  --bg-panel:       rgba(var(--panel-rgb), var(--panel-opacity));
+  --bg-elevated:    rgba(255, 255, 255, 0.07);
+  --bg-sunken:      rgba(0, 0, 0, 0.28);
+  --border:         rgba(255, 255, 255, 0.09);
+  --border-strong:  rgba(255, 255, 255, 0.16);
+  --track:          rgba(255, 255, 255, 0.14);
+  --knob-off:       rgba(255, 255, 255, 0.45);
+
+  /* ── Text ── */
+  --text-primary: rgba(255, 255, 255, 0.9);
+  --text-muted:   rgba(255, 255, 255, 0.7);
+  --text-dim:     rgba(255, 255, 255, 0.5);
+  --text-faint:   rgba(255, 255, 255, 0.3);
+  --text-on-accent: rgb(8, 8, 10);
+
+  /* ── Typography ── */
+  --font: 'Roboto Flex', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'SF Mono', 'Consolas', monospace;
+  --fw-light: 400;
+  --fw-medium: 600;
+  --fw-heavy: 800;
+  --fs-small: 0.6875rem;   /* 11px */
+  --fs-medium: 0.75rem;    /* 12px */
+  --fs-normal: 0.8125rem;  /* 13px */
+  --fs-large: 1rem;        /* 16px */
+
+  /* ── Radii ──
+     The window corner is not here: DWM rounds it natively (main.rs). */
+  --r-sm: 0.25rem;
+  --r-md: 0.5rem;
+
+  /* ── Effects (live-tuned from Aparença) ── */
+  --bg-panel-blur: 12px;
+  --bg-image-blur: 0px;
+  --bg-image: none;
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="light"] {
+  --accent-rgb:    18, 135, 35;
+  --danger:        rgb(200, 35, 35);
+  --danger-soft:   rgba(200, 35, 35, 0.12);
+  --warning:       rgb(200, 110, 20);
+
+  --panel-rgb:     255, 255, 255;
+  --bg-base:       rgb(229, 223, 231);
+  --bg-elevated:   rgba(0, 0, 0, 0.06);
+  --bg-sunken:     rgba(0, 0, 0, 0.05);
+  --border:        rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.2);
+  --track:         rgba(0, 0, 0, 0.15);
+  --knob-off:      rgba(0, 0, 0, 0.35);
+
+  --text-primary: rgba(0, 0, 0, 0.9);
+  --text-muted:   rgba(0, 0, 0, 0.65);
+  --text-dim:     rgba(0, 0, 0, 0.5);
+  --text-faint:   rgba(0, 0, 0, 0.3);
+  --text-on-accent: rgb(255, 255, 255);
+
+}

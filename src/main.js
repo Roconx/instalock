@@ -1,5 +1,8 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+const { getCurrentWindow } = window.__TAURI__.window;
+
+const appWindow = getCurrentWindow();
 
 // DOM elements
 const statusDot = document.getElementById("statusDot");
@@ -15,6 +18,11 @@ const banChampion = document.getElementById("banChampion");
 const pickDropdown = document.getElementById("pickDropdown");
 const banDropdown = document.getElementById("banDropdown");
 const logEl = document.getElementById("log");
+const logEmpty = document.getElementById("logEmpty");
+const logCount = document.getElementById("logCount");
+const logClear = document.getElementById("logClear");
+const sbLastLog = document.getElementById("sbLastLog");
+const launchLol = document.getElementById("launchLol");
 
 // Delay elements
 const acceptDelay = document.getElementById("acceptDelay");
@@ -26,14 +34,36 @@ const banDelayValue = document.getElementById("banDelayValue");
 const actionMargin = document.getElementById("actionMargin");
 const actionMarginValue = document.getElementById("actionMarginValue");
 
-// Views
-const mainView = document.getElementById("mainView");
-const settingsView = document.getElementById("settingsView");
-const settingsBtn = document.getElementById("settingsBtn");
-const settingsBack = document.getElementById("settingsBack");
+// Titlebar
+const titlebar = document.getElementById("titlebar");
+const tbPin = document.getElementById("tbPin");
+const tbMinimize = document.getElementById("tbMinimize");
+const tbClose = document.getElementById("tbClose");
+
+// Appearance
+const themeSegmented = document.getElementById("themeSegmented");
+const bgPick = document.getElementById("bgPick");
+const bgClear = document.getElementById("bgClear");
+const bgFile = document.getElementById("bgFile");
+const bgBlur = document.getElementById("bgBlur");
+const bgBlurValue = document.getElementById("bgBlurValue");
+const panelBlur = document.getElementById("panelBlur");
+const panelBlurValue = document.getElementById("panelBlurValue");
+const panelOpacity = document.getElementById("panelOpacity");
+const panelOpacityValue = document.getElementById("panelOpacityValue");
+const alwaysOnTop = document.getElementById("alwaysOnTop");
+const minimizeToTray = document.getElementById("minimizeToTray");
+
+// Tabs
+const views = {
+  main: document.getElementById("mainView"),
+  settings: document.getElementById("settingsView"),
+  appearance: document.getElementById("appearanceView"),
+  log: document.getElementById("logView"),
+};
 
 // State
-let championNames = [];
+let champOptions = [];
 let saveTimeout = null;
 
 // Normalize: same logic as Rust backend
@@ -41,10 +71,56 @@ function normalize(name) {
   return name.toLowerCase().replace(/['\s.]/g, "").replace(/&/g, "and");
 }
 
-function fuzzyMatch(champions, query) {
-  if (!query) return [];
+// Same normalization, but keeping an index back into the original string so a
+// match found in "kaisa" can be highlighted in the displayed "Kai'Sa".
+function normalizeWithMap(name) {
+  let norm = "";
+  const map = [];
+  for (let i = 0; i < name.length; i++) {
+    const ch = name[i].toLowerCase();
+    if (ch === "'" || ch === " " || ch === ".") continue;
+    if (ch === "&") {
+      norm += "and";
+      map.push(i, i, i);
+      continue;
+    }
+    norm += ch;
+    map.push(i);
+  }
+  return { norm, map };
+}
+
+const CHAMP_ICON_BASE =
+  "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons";
+
+function championIconUrl(id) {
+  return `${CHAMP_ICON_BASE}/${id}.png`;
+}
+
+// Rank matches: exact name, then prefix, then substring; ties alphabetically.
+// The old plain `includes` filter put "Lee Sin" above "Sion" for "si".
+function rankChampions(query) {
+  if (!query.trim()) return champOptions.slice();
   const q = normalize(query);
-  return champions.filter((name) => normalize(name).includes(q)).slice(0, 8);
+  if (!q) return champOptions.slice();
+
+  const scored = [];
+  for (const champ of champOptions) {
+    const at = champ.norm.indexOf(q);
+    if (at < 0) continue;
+    scored.push({ champ, at, score: champ.norm === q ? 0 : at === 0 ? 1 : 2 });
+  }
+  scored.sort(
+    (a, b) =>
+      a.score - b.score || a.at - b.at || a.champ.name.localeCompare(b.champ.name)
+  );
+  return scored.map((s) => ({ ...s.champ, matchAt: s.at, matchLen: q.length }));
+}
+
+function findChampion(value) {
+  const q = normalize(value);
+  if (!q) return null;
+  return champOptions.find((c) => c.norm === q) || null;
 }
 
 // Format delay value
@@ -55,73 +131,154 @@ function formatDelay(val) {
 
 // Autocomplete setup
 function setupAutocomplete(input, dropdown) {
+  const wrapper = input.closest(".champ-autocomplete");
+  const avatar = wrapper.querySelector(".champ-avatar");
+  const clearBtn = wrapper.querySelector(".champ-clear");
   let activeIdx = -1;
+
+  // Reflect the current value: avatar, clear button, and whether the typed name
+  // actually resolves to a champion (a typo would otherwise fail silently at
+  // pick time, with nothing in the UI to explain it).
+  function refresh() {
+    const value = input.value.trim();
+    const champ = findChampion(value);
+    wrapper.classList.toggle("filled", value.length > 0);
+    // Don't flag as invalid while the list is still loading.
+    wrapper.classList.toggle(
+      "invalid",
+      value.length > 0 && champOptions.length > 0 && !champ
+    );
+    avatar.style.backgroundImage = champ ? `url("${championIconUrl(champ.id)}")` : "";
+  }
+
+  function optionEl(champ) {
+    const row = document.createElement("div");
+    row.className = "champ-option";
+
+    const icon = document.createElement("span");
+    icon.className = "champ-option-icon";
+    icon.style.backgroundImage = `url("${championIconUrl(champ.id)}")`;
+
+    const label = document.createElement("span");
+    label.className = "champ-option-name";
+    if (champ.matchLen) {
+      // Map the match back onto the display name through the index table
+      const from = champ.map[champ.matchAt];
+      const to = champ.map[champ.matchAt + champ.matchLen - 1] + 1;
+      label.append(champ.name.slice(0, from));
+      const hit = document.createElement("mark");
+      hit.textContent = champ.name.slice(from, to);
+      label.append(hit, champ.name.slice(to));
+    } else {
+      label.textContent = champ.name;
+    }
+
+    row.append(icon, label);
+    row.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      select(champ.name);
+    });
+    return row;
+  }
+
+  function select(name) {
+    input.value = name;
+    dropdown.classList.remove("open");
+    refresh();
+    saveSettingsDebounced();
+  }
 
   function show(matches) {
     dropdown.innerHTML = "";
-    if (matches.length === 0) {
-      dropdown.classList.remove("open");
+    activeIdx = -1;
+
+    if (!champOptions.length) {
+      dropdown.innerHTML = '<div class="champ-empty">Carregant champions…</div>';
+      dropdown.classList.add("open");
       return;
     }
-    activeIdx = -1;
-    for (const name of matches) {
-      const div = document.createElement("div");
-      div.className = "champ-option";
-      div.textContent = name;
-      div.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        input.value = name;
-        dropdown.classList.remove("open");
-        saveSettingsDebounced();
-      });
-      dropdown.appendChild(div);
+    if (!matches.length) {
+      dropdown.innerHTML = '<div class="champ-empty">Cap champion trobat</div>';
+      dropdown.classList.add("open");
+      return;
     }
+
+    const frag = document.createDocumentFragment();
+    matches.forEach((champ) => frag.appendChild(optionEl(champ)));
+    dropdown.appendChild(frag);
     dropdown.classList.add("open");
+    dropdown.scrollTop = 0;
   }
 
   input.addEventListener("input", () => {
-    show(fuzzyMatch(championNames, input.value));
+    refresh();
+    show(rankChampions(input.value));
   });
 
+  // Focusing opens the list instead of nothing. When the field already holds a
+  // valid champion there is nothing left to narrow, so show the whole roster
+  // and preselect the text so typing replaces it.
   input.addEventListener("focus", () => {
-    if (input.value) {
-      show(fuzzyMatch(championNames, input.value));
-    }
+    const exact = findChampion(input.value);
+    if (exact) input.select();
+    show(rankChampions(exact ? "" : input.value));
   });
 
   input.addEventListener("blur", () => {
     setTimeout(() => dropdown.classList.remove("open"), 150);
+    refresh();
+  });
+
+  clearBtn.addEventListener("click", () => {
+    input.value = "";
+    refresh();
+    saveSettingsDebounced();
+    input.focus();
   });
 
   input.addEventListener("keydown", (e) => {
     const options = dropdown.querySelectorAll(".champ-option");
+
+    if (e.key === "Escape") {
+      dropdown.classList.remove("open");
+      return;
+    }
+    if (e.key === "ArrowDown" && !dropdown.classList.contains("open")) {
+      e.preventDefault();
+      show(rankChampions(input.value));
+      return;
+    }
     if (!options.length) return;
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      activeIdx = Math.min(activeIdx + 1, options.length - 1);
+      activeIdx = (activeIdx + 1) % options.length;
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      activeIdx = Math.max(activeIdx - 1, 0);
+      activeIdx = (activeIdx - 1 + options.length) % options.length;
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const pick = activeIdx >= 0 ? options[activeIdx] : (options.length === 1 ? options[0] : null);
-      if (pick) {
-        input.value = pick.textContent;
-        dropdown.classList.remove("open");
-        saveSettingsDebounced();
-      }
+      const pick =
+        activeIdx >= 0 ? options[activeIdx] : options.length === 1 ? options[0] : null;
+      if (pick) select(pick.querySelector(".champ-option-name").textContent);
       return;
-    } else if (e.key === "Escape") {
-      dropdown.classList.remove("open");
+    } else if (e.key === "Tab") {
+      // Tabbing away with one obvious candidate completes it
+      if (options.length === 1) {
+        select(options[0].querySelector(".champ-option-name").textContent);
+      }
       return;
     } else {
       return;
     }
 
     options.forEach((o, i) => o.classList.toggle("active", i === activeIdx));
-    if (activeIdx >= 0) options[activeIdx].scrollIntoView({ block: "nearest" });
+    options[activeIdx].scrollIntoView({ block: "nearest" });
   });
+
+  // Re-run when the champion list finally arrives
+  input.addEventListener("champions-ready", refresh);
+  refresh();
 }
 
 // Toggle card-body disabled state + bravery exclusivity
@@ -138,23 +295,57 @@ function updateCardBodyStates() {
   braveryEnabled.disabled = !autoPick.checked;
 }
 
-// Settings view toggle
-function toggleSettingsView() {
-  const isSettings = !settingsView.classList.contains("hidden");
-  if (isSettings) {
-    settingsView.classList.add("hidden");
-    mainView.classList.remove("hidden");
-    settingsBtn.classList.remove("active");
-    logEl.classList.remove("hidden");
-  } else {
-    mainView.classList.add("hidden");
-    settingsView.classList.remove("hidden");
-    settingsBtn.classList.add("active");
-    logEl.classList.add("hidden");
+// ── Tabs ──
+
+function showTab(name) {
+  for (const [key, el] of Object.entries(views)) {
+    el.classList.toggle("hidden", key !== name);
   }
+  document.querySelectorAll(".tb-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === name);
+  });
+  // The appearance tab drops the accent rule so it doesn't fight the previews.
+  titlebar.classList.toggle("flat", name === "appearance");
 }
 
-// Initialize
+// ── Appearance ──
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  themeSegmented.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.themeValue === theme);
+  });
+}
+
+function applyBackground(dataUri) {
+  document.documentElement.style.setProperty(
+    "--bg-image",
+    dataUri ? `url("${dataUri}")` : "none"
+  );
+  // Gates the backdrop-filter rules: no image, no glass, no wasted layers
+  document.documentElement.classList.toggle("has-bg", !!dataUri);
+}
+
+function applyBgBlur(px) {
+  bgBlur.value = px;
+  bgBlurValue.textContent = `${Math.round(px)}px`;
+  document.documentElement.style.setProperty("--bg-image-blur", `${px}px`);
+}
+
+function applyPanelBlur(px) {
+  panelBlur.value = px;
+  panelBlurValue.textContent = `${Math.round(px)}px`;
+  document.documentElement.style.setProperty("--bg-panel-blur", `${px}px`);
+}
+
+function applyPanelOpacity(op) {
+  panelOpacity.value = op;
+  panelOpacityValue.textContent = parseFloat(op).toFixed(2);
+  document.documentElement.style.setProperty("--panel-opacity", op);
+}
+
+// ── Init ──
+
 async function init() {
   // Register event listeners FIRST
   await listen("lcu-status", (event) => setConnected(event.payload));
@@ -166,8 +357,35 @@ async function init() {
   const settings = await invoke("get_settings");
   applySettings(settings);
 
+  // Background image lives next to settings.json, not inside it
+  applyBackground(await invoke("get_background"));
+
   const connected = await invoke("is_lcu_connected");
   setConnected(connected);
+
+  // Hide the button entirely on a machine with no Riot Client installed.
+  canLaunchLeague = await invoke("can_launch_league");
+  updateLaunchButton();
+
+  launchLol.addEventListener("click", async () => {
+    if (launchLol.disabled) return;
+    launchLol.disabled = true;
+    launchLol.textContent = "Obrint…";
+
+    try {
+      await invoke("launch_league");
+    } catch (e) {
+      // The backend already emits the failure to the log; don't double-report.
+      console.error("launch_league failed", e);
+    }
+
+    // The client takes a good while to come up and the button disappears on
+    // its own once the LCU connects. Re-arm in case it never does.
+    setTimeout(() => {
+      launchLol.disabled = false;
+      launchLol.textContent = "Obrir LoL";
+    }, 10000);
+  });
 
   // Load autostart state
   const autoStartEl = document.getElementById("autoStart");
@@ -247,12 +465,96 @@ async function init() {
   const syncServerUrl = document.getElementById("syncServerUrl");
   if (syncServerUrl) syncServerUrl.addEventListener("blur", () => saveSettingsDebounced());
 
-  // Settings view
-  settingsBtn.addEventListener("click", toggleSettingsView);
-  settingsBack.addEventListener("click", toggleSettingsView);
+  minimizeToTray.addEventListener("change", () => saveSettingsDebounced());
+
+  // Tabs
+  document.querySelectorAll(".tb-tab").forEach((btn) => {
+    btn.addEventListener("click", () => showTab(btn.dataset.tab));
+  });
+
+  setupWindowControls();
+  setupAppearanceControls();
+
+  logClear.addEventListener("click", clearLog);
+  refreshLogChrome();
 
   // Initial card body states
   updateCardBodyStates();
+}
+
+function setupWindowControls() {
+  tbMinimize.addEventListener("click", () => appWindow.minimize());
+
+  tbClose.addEventListener("click", async () => {
+    // hide() never fires beforeunload, so flush pending settings by hand.
+    await flushSettings();
+    if (minimizeToTray.checked) {
+      await appWindow.hide();
+    } else {
+      await appWindow.close();
+    }
+  });
+
+  tbPin.addEventListener("click", () => {
+    alwaysOnTop.checked = !alwaysOnTop.checked;
+    applyAlwaysOnTop(alwaysOnTop.checked);
+    saveSettingsDebounced();
+  });
+}
+
+function applyAlwaysOnTop(on) {
+  appWindow.setAlwaysOnTop(on);
+  tbPin.classList.toggle("pinned", on);
+  alwaysOnTop.checked = on;
+}
+
+function setupAppearanceControls() {
+  themeSegmented.querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      applyTheme(btn.dataset.themeValue);
+      saveSettingsDebounced();
+    });
+  });
+
+  bgPick.addEventListener("click", () => bgFile.click());
+
+  bgFile.addEventListener("change", () => {
+    const file = bgFile.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      applyBackground(reader.result);
+      await invoke("save_background", { dataUri: reader.result });
+    };
+    reader.readAsDataURL(file);
+    // Reset so re-picking the same file still fires a change event
+    bgFile.value = "";
+  });
+
+  bgClear.addEventListener("click", async () => {
+    applyBackground(null);
+    await invoke("clear_background");
+  });
+
+  bgBlur.addEventListener("input", () => {
+    applyBgBlur(bgBlur.value);
+    saveSettingsDebounced();
+  });
+
+  panelBlur.addEventListener("input", () => {
+    applyPanelBlur(panelBlur.value);
+    saveSettingsDebounced();
+  });
+
+  panelOpacity.addEventListener("input", () => {
+    applyPanelOpacity(panelOpacity.value);
+    saveSettingsDebounced();
+  });
+
+  alwaysOnTop.addEventListener("change", () => {
+    applyAlwaysOnTop(alwaysOnTop.checked);
+    saveSettingsDebounced();
+  });
 }
 
 function applySettings(s) {
@@ -298,6 +600,14 @@ function applySettings(s) {
   const syncServerUrl = document.getElementById("syncServerUrl");
   if (syncServerUrl) syncServerUrl.value = s.syncServerUrl || "";
 
+  // Appearance
+  applyTheme(s.theme === "light" ? "light" : "dark");
+  applyBgBlur(s.bgBlur ?? 0);
+  applyPanelBlur(s.panelBlur ?? 12);
+  applyPanelOpacity(s.panelOpacity ?? 0.55);
+  applyAlwaysOnTop(s.alwaysOnTop || false);
+  minimizeToTray.checked = s.minimizeToTray !== false;
+
   updateCardBodyStates();
 }
 
@@ -320,14 +630,28 @@ function collectSettings() {
     overlayOpacity: parseFloat(document.getElementById("overlayOpacity")?.value) || 0.8,
     syncEnabled: document.getElementById("syncEnabled")?.checked || false,
     syncServerUrl: document.getElementById("syncServerUrl")?.value?.trim() || "ws://localhost:9876",
+    theme: document.documentElement.dataset.theme === "light" ? "light" : "dark",
+    bgBlur: parseFloat(bgBlur.value) || 0,
+    panelBlur: parseFloat(panelBlur.value) || 0,
+    panelOpacity: parseFloat(panelOpacity.value) || 0.55,
+    alwaysOnTop: alwaysOnTop.checked,
+    minimizeToTray: minimizeToTray.checked,
   };
 }
 
 function saveSettingsDebounced() {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
+    saveTimeout = null;
     await invoke("update_settings", { settings: collectSettings() });
   }, 300);
+}
+
+// Force a pending debounced save through immediately.
+async function flushSettings() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = null;
+  await invoke("update_settings", { settings: collectSettings() });
 }
 
 // Save immediately on close so debounced changes aren't lost
@@ -339,9 +663,14 @@ window.addEventListener("beforeunload", () => {
 });
 
 async function loadChampions() {
-  const names = await invoke("get_champions");
-  if (names.length === 0) return false;
-  championNames = names;
+  const entries = await invoke("get_champion_options");
+  if (entries.length === 0) return false;
+  // Precompute the normalized form and its index map once, not per keystroke
+  champOptions = entries.map((c) => ({ ...c, ...normalizeWithMap(c.name) }));
+  // Let the pickers repaint their avatar / validity now that names are known
+  [pickChampion, banChampion].forEach((el) =>
+    el.dispatchEvent(new Event("champions-ready"))
+  );
   return true;
 }
 
@@ -352,7 +681,19 @@ async function loadChampionsWithRetry() {
   }
 }
 
+// The launch button depends on two things that resolve at different times:
+// whether the LCU is up, and whether there is a Riot Client to drive at all.
+let lcuConnected = false;
+let canLaunchLeague = false;
+
+function updateLaunchButton() {
+  launchLol.hidden = lcuConnected || !canLaunchLeague;
+}
+
 function setConnected(connected) {
+  lcuConnected = connected;
+  updateLaunchButton();
+
   if (connected) {
     statusDot.classList.add("connected");
     statusText.textContent = "Connectat";
@@ -360,6 +701,9 @@ function setConnected(connected) {
     statusDot.classList.remove("connected");
     statusText.textContent = "Desconnectat";
   }
+  // Titlebar rule mirrors the connection, like the reference's running state
+  titlebar.classList.toggle("running", connected);
+  titlebar.classList.toggle("off", !connected);
 }
 
 function applyQueueMode(payload) {
@@ -373,32 +717,62 @@ function applyQueueMode(payload) {
   modeIndicator.hidden = false;
 }
 
+function logSeverity(text) {
+  if (text.includes("Error")) return "error";
+  if (text.includes("connectat") && !text.includes("des")) return "connect";
+  if (text.includes("desconnectat")) return "disconnect";
+  return "action";
+}
+
+function countLogEntries() {
+  return logEl.querySelectorAll(".log-entry").length;
+}
+
+function refreshLogChrome() {
+  const n = countLogEntries();
+  logEmpty.hidden = n > 0;
+  logCount.textContent =
+    n === 0 ? "Cap entrada" : n === 1 ? "1 entrada" : `${n} entrades`;
+  logClear.disabled = n === 0;
+}
+
+function clearLog() {
+  logEl.querySelectorAll(".log-entry").forEach((e) => e.remove());
+  sbLastLog.textContent = "";
+  refreshLogChrome();
+}
+
 function addLog(text) {
   const entry = document.createElement("div");
-  entry.className = "log-entry";
+  entry.className = `log-entry ${logSeverity(text)}`;
 
-  if (text.includes("Error")) {
-    entry.classList.add("error");
-  } else if (text.includes("connectat") && !text.includes("des")) {
-    entry.classList.add("connect");
-  } else if (text.includes("desconnectat")) {
-    entry.classList.add("disconnect");
-  } else {
-    entry.classList.add("action");
-  }
-
-  const time = new Date().toLocaleTimeString("ca", {
+  const time = document.createElement("span");
+  time.className = "log-time";
+  time.textContent = new Date().toLocaleTimeString("ca", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
   });
-  entry.textContent = `${time}  ${text}`;
+
+  const msg = document.createElement("span");
+  msg.className = "log-msg";
+  msg.textContent = text;
+
+  entry.append(time, msg);
   logEl.appendChild(entry);
   logEl.scrollTop = logEl.scrollHeight;
 
-  while (logEl.children.length > 50) {
-    logEl.removeChild(logEl.firstChild);
+  // Cap the history, but only ever drop entries - the empty-state node lives
+  // in the same container and must survive.
+  let entries = logEl.querySelectorAll(".log-entry");
+  while (entries.length > 50) {
+    entries[0].remove();
+    entries = logEl.querySelectorAll(".log-entry");
   }
+
+  // Mirror the latest line into the statusbar; the full history stays in the tab
+  sbLastLog.textContent = text;
+  refreshLogChrome();
 }
 
 init();

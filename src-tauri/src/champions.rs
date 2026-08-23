@@ -1,6 +1,13 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+/// One entry in the champion picker.
+#[derive(Clone, Serialize)]
+pub struct ChampionOption {
+    pub id: i32,
+    pub name: String,
+}
 
 #[derive(Deserialize)]
 struct ChampionEntry {
@@ -125,6 +132,21 @@ impl Champions {
 
     pub fn get_names(&self) -> Vec<String> {
         self.names.lock().unwrap().clone()
+    }
+
+    /// Name paired with its numeric id, sorted by name. The picker needs the id
+    /// to build the Community Dragon icon URL.
+    pub fn get_entries(&self) -> Vec<ChampionOption> {
+        let id_to_name = self.id_to_name.lock().unwrap();
+        let mut out: Vec<ChampionOption> = id_to_name
+            .iter()
+            .map(|(&id, name)| ChampionOption {
+                id,
+                name: name.clone(),
+            })
+            .collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
     }
 
     pub fn get_id_to_name(&self) -> HashMap<i32, String> {

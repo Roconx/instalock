@@ -252,11 +252,19 @@ async function savePosition() {
   await invoke("save_overlay_position", { x: pos.x, y: pos.y });
 }
 
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
+}
+
 // Listen for events from backend
 async function init() {
   // Load settings for opacity
   const settings = await invoke("get_settings");
   overlayEl.style.setProperty("--opacity", settings.overlayOpacity ?? 0.8);
+  applyTheme(settings.theme);
+
+  // Keep the overlay on the same theme as the main window
+  await listen("theme", (event) => applyTheme(event.payload));
 
   try {
     const pos = await getCurrentWindow().outerPosition();

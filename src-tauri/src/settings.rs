@@ -39,6 +39,20 @@ pub struct Settings {
     pub sync_enabled: bool,
     #[serde(default = "default_server_url")]
     pub sync_server_url: String,
+    // Appearance settings. All defaulted so settings.json files written by
+    // earlier versions keep loading without a migration step.
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default)]
+    pub bg_blur: f64,
+    #[serde(default = "default_panel_blur")]
+    pub panel_blur: f64,
+    #[serde(default = "default_panel_opacity")]
+    pub panel_opacity: f64,
+    #[serde(default)]
+    pub always_on_top: bool,
+    #[serde(default = "default_true")]
+    pub minimize_to_tray: bool,
 }
 
 fn default_true() -> bool {
@@ -55,6 +69,18 @@ fn default_opacity() -> f64 {
 
 fn default_server_url() -> String {
     "ws://localhost:9876".to_string()
+}
+
+fn default_theme() -> String {
+    "dark".to_string()
+}
+
+fn default_panel_blur() -> f64 {
+    12.0
+}
+
+fn default_panel_opacity() -> f64 {
+    0.55
 }
 
 impl Default for Settings {
@@ -78,8 +104,21 @@ impl Default for Settings {
             overlay_y: None,
             sync_enabled: false,
             sync_server_url: default_server_url(),
+            theme: default_theme(),
+            bg_blur: 0.0,
+            panel_blur: default_panel_blur(),
+            panel_opacity: default_panel_opacity(),
+            always_on_top: false,
+            minimize_to_tray: true,
         }
     }
+}
+
+/// Directory holding settings.json and the background image.
+pub fn config_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("instalock")
 }
 
 pub struct SettingsManager {
@@ -89,10 +128,7 @@ pub struct SettingsManager {
 
 impl SettingsManager {
     pub fn new() -> Self {
-        let path = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("instalock")
-            .join("settings.json");
+        let path = config_dir().join("settings.json");
 
         let settings = Self::load_from(&path);
 

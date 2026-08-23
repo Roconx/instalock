@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ca">
+<html lang="ca" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,176 +7,316 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
-    <header>
-      <div class="header-left">
-        <h1>InstaLock</h1>
-        <span class="mode-indicator" id="modeIndicator" hidden>
-          <span id="modeName">—</span>
-        </span>
-      </div>
-      <div class="header-right">
-        <span class="status">
-          <span class="dot" id="statusDot"></span>
-          <span id="statusText">Desconnectat</span>
-        </span>
-        <button class="settings-btn" id="settingsBtn" title="Configuració">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/>
-            <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.434-.901 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.421 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.421-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.377l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.116l.094-.318z"/>
+  <div class="app-root">
+
+    <!-- ── Titlebar: tabs left, window controls right ── -->
+    <div class="titlebar" id="titlebar" data-tauri-drag-region>
+      <div class="tb-tabs">
+        <button class="tb-tab active" data-tab="main" title="Principal">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round">
+            <path d="M9 1.5 L3.5 9 H7.5 L7 14.5 L12.5 7 H8.5 Z"/>
+          </svg>
+        </button>
+        <button class="tb-tab" data-tab="settings" title="Ajustos">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+            <path d="M2 4.5h3M8 4.5h6M2 8h8M13 8h1M2 11.5h2M7 11.5h7"/>
+            <circle cx="6.5" cy="4.5" r="1.6"/>
+            <circle cx="11.5" cy="8" r="1.6"/>
+            <circle cx="5.5" cy="11.5" r="1.6"/>
+          </svg>
+        </button>
+        <button class="tb-tab" data-tab="appearance" title="Aparença">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+            <circle cx="8" cy="8" r="5.75"/>
+            <path d="M8 2.25 A5.75 5.75 0 0 1 8 13.75 Z" fill="currentColor" stroke="none"/>
+          </svg>
+        </button>
+        <button class="tb-tab" data-tab="log" title="Registre">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+            <path d="M6 4h8M6 8h8M6 12h5"/>
+            <circle cx="3" cy="4" r="0.9" fill="currentColor" stroke="none"/>
+            <circle cx="3" cy="8" r="0.9" fill="currentColor" stroke="none"/>
+            <circle cx="3" cy="12" r="0.9" fill="currentColor" stroke="none"/>
           </svg>
         </button>
       </div>
-    </header>
 
-    <!-- Main view -->
-    <div id="mainView">
-      <main>
-        <section class="card">
-          <div class="card-header">
-            <span class="card-title">Auto Accept</span>
-            <label class="toggle">
-              <input type="checkbox" id="autoAccept">
-              <span class="slider"></span>
-            </label>
-          </div>
-        </section>
+      <div class="tb-title" data-tauri-drag-region>InstaLock</div>
 
-        <section class="card pick-row">
-          <div class="card-header">
-            <span class="card-title">Auto Pick</span>
-            <div class="card-header-right">
-              <label class="bravery-toggle">
-                <input type="checkbox" id="braveryEnabled">
-                <span title="Nomes s'aplica a Arena">Bravery (Arena)</span>
-              </label>
+      <div class="tb-window-controls">
+        <button class="tb-btn" id="tbPin" title="Sempre a davant">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round">
+            <path d="M9.7 1.8 L14.2 6.3 L11.6 7.1 L9.9 11.1 L4.9 6.1 L8.9 4.4 Z"/>
+            <path d="M5.2 10.8 L2.2 13.8"/>
+          </svg>
+        </button>
+        <button class="tb-btn" id="tbMinimize" title="Minimitzar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+            <path d="M3.5 8 H12.5"/>
+          </svg>
+        </button>
+        <button class="tb-btn danger" id="tbClose" title="Tancar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+            <path d="M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Panels ── -->
+    <div class="panel-area" id="panelArea">
+
+      <!-- Main -->
+      <div id="mainView">
+        <main>
+          <section class="card">
+            <div class="card-header">
+              <span class="card-title">Auto Accept</span>
               <label class="toggle">
-                <input type="checkbox" id="autoPick">
+                <input type="checkbox" id="autoAccept">
                 <span class="slider"></span>
               </label>
             </div>
-          </div>
-          <div class="card-body" data-toggle="autoPick">
-            <div class="champ-autocomplete">
-              <input type="text" id="pickChampion" placeholder="Champion..." class="champ-input" autocomplete="off">
-              <div class="champ-dropdown" id="pickDropdown"></div>
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <section class="card ban-row">
-          <div class="card-header">
-            <span class="card-title">Auto Ban</span>
-            <label class="toggle">
-              <input type="checkbox" id="autoBan">
-              <span class="slider"></span>
+          <section class="card pick-row">
+            <div class="card-header">
+              <span class="card-title">Auto Pick</span>
+              <div class="card-header-right">
+                <label class="bravery-toggle">
+                  <input type="checkbox" id="braveryEnabled">
+                  <span title="Nomes s'aplica a Arena">Bravery (Arena)</span>
+                </label>
+                <label class="toggle">
+                  <input type="checkbox" id="autoPick">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="card-body" data-toggle="autoPick">
+              <div class="champ-autocomplete" data-picker="pick">
+                <div class="champ-field">
+                  <span class="champ-avatar"></span>
+                  <input type="text" id="pickChampion" placeholder="Cerca un champion..." class="champ-input" autocomplete="off" spellcheck="false">
+                  <button class="champ-clear" type="button" tabindex="-1" title="Esborrar">&times;</button>
+                </div>
+                <div class="champ-dropdown" id="pickDropdown"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card ban-row">
+            <div class="card-header">
+              <span class="card-title">Auto Ban</span>
+              <label class="toggle">
+                <input type="checkbox" id="autoBan">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="card-body" data-toggle="autoBan">
+              <div class="champ-autocomplete" data-picker="ban">
+                <div class="champ-field">
+                  <span class="champ-avatar"></span>
+                  <input type="text" id="banChampion" placeholder="Cerca un champion..." class="champ-input" autocomplete="off" spellcheck="false">
+                  <button class="champ-clear" type="button" tabindex="-1" title="Esborrar">&times;</button>
+                </div>
+                <div class="champ-dropdown" id="banDropdown"></div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      <!-- Settings -->
+      <div id="settingsView" class="hidden">
+        <div class="settings-section">
+          <div class="settings-section-title">General</div>
+          <div class="settings-list">
+            <label class="settings-item">
+              <span class="settings-item-label">Engegar amb el sistema</span>
+              <input type="checkbox" id="autoStart">
+            </label>
+            <label class="settings-item">
+              <span class="settings-item-label">Retornar focus després d'acció</span>
+              <input type="checkbox" id="restoreFocus">
+            </label>
+            <label class="settings-item">
+              <span class="settings-item-label">Hover champion abans de lockejar</span>
+              <input type="checkbox" id="hoverPick">
+            </label>
+            <label class="settings-item">
+              <span class="settings-item-label">Minimitzar a la safata en tancar</span>
+              <input type="checkbox" id="minimizeToTray">
             </label>
           </div>
-          <div class="card-body" data-toggle="autoBan">
-            <div class="champ-autocomplete">
-              <input type="text" id="banChampion" placeholder="Champion..." class="champ-input" autocomplete="off">
-              <div class="champ-dropdown" id="banDropdown"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Delays</div>
+          <div class="settings-list">
+            <div class="settings-item">
+              <span class="settings-item-label">Acceptar partida</span>
+              <div class="slider-control">
+                <input type="range" class="delay-slider" id="acceptDelay" min="0" max="10" step="0.5" value="0">
+                <span class="delay-value" id="acceptDelayValue">0s</span>
+              </div>
+            </div>
+            <div class="settings-item">
+              <span class="settings-item-label">Pickejar champion</span>
+              <div class="slider-control">
+                <input type="range" class="delay-slider" id="pickDelay" min="0" max="28" step="0.5" value="0">
+                <span class="delay-value" id="pickDelayValue">0s</span>
+              </div>
+            </div>
+            <div class="settings-item">
+              <span class="settings-item-label">Bannejar champion</span>
+              <div class="slider-control">
+                <input type="range" class="delay-slider" id="banDelay" min="0" max="28" step="0.5" value="0">
+                <span class="delay-value" id="banDelayValue">0s</span>
+              </div>
+            </div>
+            <div class="settings-item">
+              <span class="settings-item-label">Temps mínim abans que expiri el timer</span>
+              <div class="slider-control">
+                <input type="range" class="delay-slider" id="actionMargin" min="0.5" max="5" step="0.5" value="1.5">
+                <span class="delay-value" id="actionMarginValue">1.5s</span>
+              </div>
             </div>
           </div>
-        </section>
-      </main>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Overlay</div>
+          <div class="settings-list">
+            <label class="settings-item">
+              <span class="settings-item-label">Overlay de summoners in-game</span>
+              <input type="checkbox" id="overlayEnabled">
+            </label>
+            <div class="settings-item">
+              <span class="settings-item-label">Opacitat</span>
+              <div class="slider-control">
+                <input type="range" class="delay-slider" id="overlayOpacity" min="0.3" max="1" step="0.05" value="0.8">
+                <span class="delay-value" id="overlayOpacityValue">0.8</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Sync</div>
+          <div class="settings-list">
+            <label class="settings-item">
+              <span class="settings-item-label">Sincronitzar timers amb teammates</span>
+              <input type="checkbox" id="syncEnabled">
+            </label>
+            <div class="settings-item">
+              <span class="settings-item-label">Servidor</span>
+              <input type="text" id="syncServerUrl" class="settings-text-input" placeholder="ws://192.168.1.x:9876" autocomplete="off">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Appearance -->
+      <div id="appearanceView" class="hidden">
+        <div class="settings-section">
+          <div class="settings-section-title">Tema</div>
+          <div class="settings-list">
+            <div class="settings-item">
+              <span class="settings-item-label">Aspecte</span>
+              <div class="segmented" id="themeSegmented">
+                <button data-theme-value="dark" class="active">Fosc</button>
+                <button data-theme-value="light">Clar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Fons</div>
+          <div class="settings-list">
+            <div class="settings-item">
+              <span class="settings-item-label">Imatge de fons</span>
+              <div class="btn-row">
+                <button class="btn-sm" id="bgPick">Escollir…</button>
+                <button class="btn-sm danger" id="bgClear">Treure</button>
+              </div>
+              <input type="file" id="bgFile" accept="image/*" hidden>
+            </div>
+            <div class="settings-item">
+              <span class="settings-item-label">Difuminat del fons</span>
+              <div class="slider-control">
+                <input type="range" class="delay-slider" id="bgBlur" min="0" max="40" step="1" value="0">
+                <span class="delay-value" id="bgBlurValue">0px</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Panells</div>
+          <div class="settings-list">
+            <div class="settings-item">
+              <span class="settings-item-label">Difuminat dels panells</span>
+              <div class="slider-control">
+                <input type="range" class="delay-slider" id="panelBlur" min="0" max="30" step="1" value="12">
+                <span class="delay-value" id="panelBlurValue">12px</span>
+              </div>
+            </div>
+            <div class="settings-item">
+              <span class="settings-item-label">Opacitat dels panells</span>
+              <div class="slider-control">
+                <input type="range" class="delay-slider" id="panelOpacity" min="0.2" max="1" step="0.05" value="0.55">
+                <span class="delay-value" id="panelOpacityValue">0.55</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Finestra</div>
+          <div class="settings-list">
+            <label class="settings-item">
+              <span class="settings-item-label">Sempre a davant</span>
+              <input type="checkbox" id="alwaysOnTop">
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Log -->
+      <div id="logView" class="hidden">
+        <div class="log-toolbar">
+          <span class="log-count" id="logCount">Cap entrada</span>
+          <button class="btn-sm" id="logClear" type="button">Netejar</button>
+        </div>
+        <div class="log" id="log">
+          <div class="log-empty" id="logEmpty">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 4.5h16v15H4z"/>
+              <path d="M7.5 9h9M7.5 12.5h9M7.5 16h5.5"/>
+            </svg>
+            <p class="log-empty-title">Encara no hi ha activitat</p>
+            <p class="log-empty-hint">Les accions d'InstaLock apareixeran aquí quan el client de League estigui obert.</p>
+          </div>
+        </div>
+      </div>
+
     </div>
 
-    <!-- Settings view -->
-    <div id="settingsView" class="hidden">
-      <div class="settings-back" id="settingsBack">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
-        </svg>
-        <span>Configuració</span>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-section-title">General</div>
-        <div class="settings-list">
-          <label class="settings-item">
-            <span class="settings-item-label">Engegar amb el sistema</span>
-            <input type="checkbox" id="autoStart">
-          </label>
-          <label class="settings-item">
-            <span class="settings-item-label">Retornar focus després d'acció</span>
-            <input type="checkbox" id="restoreFocus">
-          </label>
-          <label class="settings-item">
-            <span class="settings-item-label">Hover champion abans de lockejar</span>
-            <input type="checkbox" id="hoverPick">
-          </label>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-section-title">Delays</div>
-        <div class="settings-list">
-          <div class="settings-item">
-            <span class="settings-item-label">Acceptar partida</span>
-            <div class="slider-control">
-              <input type="range" class="delay-slider" id="acceptDelay" min="0" max="10" step="0.5" value="0">
-              <span class="delay-value" id="acceptDelayValue">0s</span>
-            </div>
-          </div>
-          <div class="settings-item">
-            <span class="settings-item-label">Pickejar champion</span>
-            <div class="slider-control">
-              <input type="range" class="delay-slider" id="pickDelay" min="0" max="28" step="0.5" value="0">
-              <span class="delay-value" id="pickDelayValue">0s</span>
-            </div>
-          </div>
-          <div class="settings-item">
-            <span class="settings-item-label">Bannejar champion</span>
-            <div class="slider-control">
-              <input type="range" class="delay-slider" id="banDelay" min="0" max="28" step="0.5" value="0">
-              <span class="delay-value" id="banDelayValue">0s</span>
-            </div>
-          </div>
-          <div class="settings-item">
-            <span class="settings-item-label">Temps mínim abans que expiri el timer</span>
-            <div class="slider-control">
-              <input type="range" class="delay-slider" id="actionMargin" min="0.5" max="5" step="0.5" value="1.5">
-              <span class="delay-value" id="actionMarginValue">1.5s</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-section-title">Overlay</div>
-        <div class="settings-list">
-          <label class="settings-item">
-            <span class="settings-item-label">Overlay de summoners in-game</span>
-            <input type="checkbox" id="overlayEnabled">
-          </label>
-          <div class="settings-item">
-            <span class="settings-item-label">Opacitat</span>
-            <div class="slider-control">
-              <input type="range" class="delay-slider" id="overlayOpacity" min="0.3" max="1" step="0.05" value="0.8">
-              <span class="delay-value" id="overlayOpacityValue">0.8</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-section-title">Sync</div>
-        <div class="settings-list">
-          <label class="settings-item">
-            <span class="settings-item-label">Sincronitzar timers amb teammates</span>
-            <input type="checkbox" id="syncEnabled">
-          </label>
-          <div class="settings-item">
-            <span class="settings-item-label">Servidor</span>
-            <input type="text" id="syncServerUrl" class="settings-text-input" placeholder="ws://192.168.1.x:9876" autocomplete="off">
-          </div>
-        </div>
-      </div>
+    <!-- ── Statusbar ── -->
+    <div class="statusbar">
+      <span class="sb-status">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Desconnectat</span>
+      </span>
+      <button class="sb-launch" id="launchLol" type="button" hidden>Obrir LoL</button>
+      <span class="mode-indicator" id="modeIndicator" hidden>
+        <span id="modeName">—</span>
+      </span>
+      <span class="sb-last" id="sbLastLog"></span>
     </div>
 
-    <!-- Log always visible at bottom -->
-    <div class="log" id="log"></div>
   </div>
 
   <script src="main.js"></script>

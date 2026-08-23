@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- InstaLock app icon: a padlock with a lightning bolt for a keyhole.
+       Palette matches the UI accent in src/tokens.css (rgb(25,194,51)). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1c22"/>
+      <stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3ce065"/>
+      <stop offset="1" stop-color="#19c233"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <rect x="6" y="6" width="1012" height="1012" rx="222" fill="none"
+        stroke="#19c233" stroke-opacity="0.22" stroke-width="12"/>
+
+  <!-- Shackle -->
+  <path d="M356 452 V352 a156 156 0 0 1 312 0 V452"
+        fill="none" stroke="url(#accent)" stroke-width="86" stroke-linecap="round"/>
+
+  <!-- Body -->
+  <rect x="248" y="436" width="528" height="396" rx="76" fill="url(#accent)"/>
+
+  <!-- Bolt keyhole, knocked out of the body -->
+  <path d="M566 534 L442 668 H510 L468 762 L592 628 H524 Z" fill="#0a0a0c"/>
+</svg>
