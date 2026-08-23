@@ -27,6 +27,10 @@ struct AppState {
     current_queue_mode: tokio::sync::Mutex<Option<QueueModeInfo>>,
     overlay_state: Arc<OverlayState>,
     sync_client: tokio::sync::Mutex<Option<Arc<sync::SyncClient>>>,
+    /// One accept per ready check. The LCU re-emits the ready-check event about
+    /// once a second for the whole window and each one is handled on its own
+    /// task, so without this every event would fire its own accept.
+    accept_in_flight: std::sync::atomic::AtomicBool,
 }
 
 // Tauri commands called from the frontend
@@ -86,9 +90,7 @@ fn update_settings(
                     }
                 }
             } else {
-                if let Some(w) = ah.get_webview_window("overlay") {
-                    let _ = w.close();
-                }
+                close_overlay_window(&ah);
                 let _ = ah.emit("log", "Overlay desactivat");
             }
         });
@@ -243,6 +245,7 @@ fn main() {
         current_queue_mode: tokio::sync::Mutex::new(None),
         overlay_state: overlay_state.clone(),
         sync_client: tokio::sync::Mutex::new(None),
+        accept_in_flight: std::sync::atomic::AtomicBool::new(false),
     });
 
     tauri::Builder::default()
@@ -267,9 +270,7 @@ fn main() {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if window.label() == "main" {
                     // Close overlay when main window is closed
-                    if let Some(overlay) = window.app_handle().get_webview_window("overlay") {
-                        let _ = overlay.close();
-                    }
+                    close_overlay_window(window.app_handle());
                 }
             }
         })
@@ -289,7 +290,7 @@ fn main() {
             // Spawn background tasks
             tauri::async_runtime::spawn(async move {
                 // Load champion data
-                state.champions.load().await;
+                state.champions.load_with_retry().await;
 
                 // Emit champions loaded event
                 let _ = app_handle.emit("champions-loaded", ());
@@ -322,8 +323,11 @@ fn main() {
                         LcuEvent::Disconnected => {
                             let _ = app_handle.emit("lcu-status", false);
                             let _ = app_handle.emit("log", "LCU desconnectat");
-                            // Reset dedup guard
+                            // Reset dedup guards
                             *state.last_action.lock().await = String::new();
+                            state
+                                .accept_in_flight
+                                .store(false, std::sync::atomic::Ordering::SeqCst);
                             // Clear queue mode so the UI indicator disappears
                             *state.current_queue_mode.lock().await = None;
                             let _ = app_handle.emit("queue-mode", serde_json::Value::Null);
@@ -373,6 +377,25 @@ fn main() {
         .expect("error while running tauri application");
 }
 
+/// The sync room key. Nothing ever wrote `overlay_state.game_id`, so ask the
+/// LCU for the real one and cache it for the rest of the game.
+async fn resolve_game_id(state: &Arc<AppState>) -> Option<String> {
+    if let Some(cached) = state.overlay_state.game_id.lock().await.clone() {
+        return Some(cached);
+    }
+
+    let creds = state.lcu_monitor.get_credentials().await?;
+    let session = lcu::lcu_request(&creds, "GET", "/lol-gameflow/v1/session", None)
+        .await
+        .ok()?;
+    let id = session["gameData"]["gameId"].as_i64().filter(|id| *id > 0)?;
+
+    let id = id.to_string();
+    *state.overlay_state.game_id.lock().await = Some(id.clone());
+    log::info!("Resolved game id {}", id);
+    Some(id)
+}
+
 async fn handle_gameflow_phase(state: &Arc<AppState>, app_handle: &tauri::AppHandle, phase: &str) {
     match phase {
         "ChampSelect" => {
@@ -414,14 +437,16 @@ async fn handle_gameflow_phase(state: &Arc<AppState>, app_handle: &tauri::AppHan
 
                 // Connect to sync server if enabled
                 if settings.sync_enabled && !settings.sync_server_url.is_empty() {
-                    let game_id = state
-                        .overlay_state
-                        .game_id
-                        .lock()
-                        .await
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_string());
-
+                    // The room is keyed on the game id, so a missing one would
+                    // put every player of every game in one shared room and
+                    // cross-feed their timers. Skip syncing rather than that.
+                    let game_id = resolve_game_id(state).await;
+                    if game_id.is_none() {
+                        log::warn!("No game id available, skipping sync connect");
+                        let _ = app_handle
+                            .emit("log", "Sync omes: no s'ha pogut identificar la partida");
+                    }
+                    if let Some(game_id) = game_id {
                     match sync::SyncClient::connect(
                         &settings.sync_server_url,
                         &game_id,
@@ -434,8 +459,22 @@ async fn handle_gameflow_phase(state: &Arc<AppState>, app_handle: &tauri::AppHan
                             let mut rx = client.incoming_tx.subscribe();
                             let ah = app_handle.clone();
                             tokio::spawn(async move {
-                                while let Ok(msg) = rx.recv().await {
-                                    let _ = ah.emit("sync-message", &msg);
+                                loop {
+                                    match rx.recv().await {
+                                        Ok(msg) => {
+                                            let _ = ah.emit("sync-message", &msg);
+                                        }
+                                        // Same trap as the LCU loop: Lagged is
+                                        // not the end of the stream.
+                                        Err(tokio::sync::broadcast::error::RecvError::Lagged(
+                                            n,
+                                        )) => {
+                                            log::warn!("Sync forwarder lagged, {} dropped", n);
+                                        }
+                                        Err(
+                                            tokio::sync::broadcast::error::RecvError::Closed,
+                                        ) => break,
+                                    }
                                 }
                             });
 
@@ -448,13 +487,14 @@ async fn handle_gameflow_phase(state: &Arc<AppState>, app_handle: &tauri::AppHan
                                 app_handle.emit("log", &format!("Sync error: {}", e));
                         }
                     }
+                    }
                 }
             }
         }
         "EndOfGame" | "Lobby" | "None" | "WaitingForStats" => {
             // Destroy overlay window
-            if let Some(overlay_win) = app_handle.get_webview_window("overlay") {
-                let _ = overlay_win.close();
+            if app_handle.get_webview_window("overlay").is_some() {
+                close_overlay_window(app_handle);
                 let _ = app_handle.emit("log", "Overlay tancat");
             }
 
@@ -471,6 +511,29 @@ async fn handle_gameflow_phase(state: &Arc<AppState>, app_handle: &tauri::AppHan
     if phase != "ChampSelect" {
         // Reset dedup guard when leaving champ select
         *state.last_action.lock().await = String::new();
+    }
+
+    if phase != "ReadyCheck" {
+        state
+            .accept_in_flight
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Bumped every time the overlay is closed. The Win32 watchdog thread below
+/// captures the value it was born with and exits as soon as it changes, so a
+/// retired thread can never poke a destroyed (or recycled) HWND.
+#[cfg(windows)]
+static OVERLAY_GENERATION: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Close the overlay window and retire its watchdog thread.
+fn close_overlay_window(app_handle: &tauri::AppHandle) {
+    #[cfg(windows)]
+    OVERLAY_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+    if let Some(overlay_win) = app_handle.get_webview_window("overlay") {
+        let _ = overlay_win.close();
     }
 }
 
@@ -498,13 +561,16 @@ fn create_overlay_window(
     .resizable(false)
     .focused(false);
 
-    if let (Some(x), Some(y)) = (settings.overlay_x, settings.overlay_y) {
-        builder = builder.position(x, y);
-    } else {
-        builder = builder.center();
-    }
+    builder = builder.center();
 
     let window = builder.build().map_err(|e| e.to_string())?;
+
+    // The saved coordinates come from outerPosition(), which is physical, but
+    // WebviewWindowBuilder::position takes logical pixels - restoring them
+    // there made the overlay drift on scaled displays.
+    if let (Some(x), Some(y)) = (settings.overlay_x, settings.overlay_y) {
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    }
     let _ = window.set_ignore_cursor_events(true);
 
     // Windows: match electron-overlay-window pattern
@@ -525,6 +591,8 @@ fn create_overlay_window(
             );
         }
 
+        let generation = OVERLAY_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+
         std::thread::spawn(move || {
             use windows_sys::Win32::UI::WindowsAndMessaging::*;
             unsafe {
@@ -539,6 +607,13 @@ fn create_overlay_window(
                 // Poll foreground window — show overlay when LoL is focused
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(250));
+
+                    // Stop as soon as this overlay is retired, otherwise one
+                    // thread would leak per game and keep driving a dead HWND.
+                    if OVERLAY_GENERATION.load(std::sync::atomic::Ordering::SeqCst) != generation {
+                        log::debug!("Overlay watchdog {} exiting", generation);
+                        break;
+                    }
 
                     let fg = GetForegroundWindow();
                     if fg.is_null() {
@@ -600,7 +675,34 @@ async fn handle_ready_check(
     let is_in_progress = data["state"].as_str() == Some("InProgress");
     let no_response = data["playerResponse"].as_str() == Some("None");
 
-    if is_in_progress && no_response {
+    if !is_in_progress {
+        // The ready check ended (accepted, declined or cancelled) - re-arm.
+        state
+            .accept_in_flight
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        return;
+    }
+
+    if no_response {
+        // Claim this ready check; a second event for the same one is a no-op.
+        if state
+            .accept_in_flight
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
+
+        // Capture the foreground window BEFORE the delay. LoL grabs focus when
+        // the ready check pops, but the user has usually clicked back to
+        // whatever they were doing by the time this event reaches us; capturing
+        // after the sleep would just record LoL's own window and restoring it
+        // would do the opposite of what the setting promises.
+        let captured_hwnd = if settings.restore_focus_after_action {
+            focus::capture_foreground()
+        } else {
+            None
+        };
+
         // Delay before accepting (capped so we always act before timer expires)
         let accept_delay = settings
             .accept_delay_secs
@@ -610,14 +712,6 @@ async fn handle_ready_check(
             tokio::time::sleep(std::time::Duration::from_secs_f64(accept_delay)).await;
         }
 
-        // Capture the user's current foreground window BEFORE accepting so we
-        // can restore it after LoL inevitably steals focus on the ready check.
-        let captured_hwnd = if settings.restore_focus_after_action {
-            focus::capture_foreground()
-        } else {
-            None
-        };
-
         if let Some(creds) = state.lcu_monitor.get_credentials().await {
             match actions::accept_match(&creds).await {
                 Ok(_) => {
@@ -625,9 +719,18 @@ async fn handle_ready_check(
                     spawn_focus_restore(captured_hwnd);
                 }
                 Err(e) => {
+                    log::error!("Accept failed: {}", e);
                     let _ = app_handle.emit("log", &format!("Error acceptant: {}", e));
+                    // Let the next ready-check event retry.
+                    state
+                        .accept_in_flight
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
                 }
             }
+        } else {
+            state
+                .accept_in_flight
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
     }
 }
@@ -648,9 +751,12 @@ async fn handle_champ_select(
     };
 
     // Check the timer - only act when there's an active countdown
+    // The LCU reports phase timers in milliseconds; every delay below is in
+    // seconds, and clamp_delay compares the two.
     let timer_left = session["timer"]["adjustedTimeLeftInPhase"]
         .as_f64()
-        .unwrap_or(0.0);
+        .unwrap_or(0.0)
+        / 1000.0;
     let timer_phase = session["timer"]["phase"].as_str().unwrap_or("");
 
     // Skip if we're in planning phase or timer hasn't started

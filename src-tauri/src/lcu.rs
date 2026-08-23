@@ -73,7 +73,12 @@ impl LcuMonitor {
 
         tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
-                if let Some(creds) = find_lockfile() {
+                // find_lockfile does blocking file reads and spawns a process.
+                let found = tokio::task::spawn_blocking(find_lockfile)
+                    .await
+                    .unwrap_or(None);
+
+                if let Some(creds) = found {
                     if let Err(e) =
                         run_session(&creds, &event_tx, &running, &connected, &credentials).await
                     {
@@ -94,17 +99,22 @@ impl LcuMonitor {
 }
 
 fn find_lockfile() -> Option<LcuCredentials> {
-    let paths = [
-        "C:\\Riot Games\\League of Legends\\lockfile",
-        "D:\\Riot Games\\League of Legends\\lockfile",
-        "C:\\Program Files\\Riot Games\\League of Legends\\lockfile",
-        "C:\\Program Files (x86)\\Riot Games\\League of Legends\\lockfile",
+    // Common install roots, tried across every fixed drive rather than just C:
+    // and D: — a LoL install on E: used to mean a permanent "Desconnectat".
+    const SUFFIXES: [&str; 3] = [
+        "Riot Games\\League of Legends\\lockfile",
+        "Program Files\\Riot Games\\League of Legends\\lockfile",
+        "Program Files (x86)\\Riot Games\\League of Legends\\lockfile",
     ];
 
-    for path in &paths {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if let Some(creds) = parse_lockfile(&content) {
-                return Some(creds);
+    for drive in 'C'..='Z' {
+        for suffix in &SUFFIXES {
+            let path = format!("{}:\\{}", drive, suffix);
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Some(creds) = parse_lockfile(&content) {
+                    log::info!("Found lockfile at {}", path);
+                    return Some(creds);
+                }
             }
         }
     }
@@ -112,17 +122,27 @@ fn find_lockfile() -> Option<LcuCredentials> {
     find_lockfile_from_process()
 }
 
+/// Fallback: read the port and token straight off the running client's command
+/// line. wmic is gone on current Windows 11, so this goes through CIM instead.
 fn find_lockfile_from_process() -> Option<LcuCredentials> {
-    let output = std::process::Command::new("wmic")
-        .args([
-            "process",
-            "where",
-            "name='LeagueClientUx.exe'",
-            "get",
-            "CommandLine",
-        ])
-        .output()
-        .ok()?;
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "(Get-CimInstance Win32_Process -Filter \"name='LeagueClientUx.exe'\").CommandLine",
+    ]);
+
+    // The app is built with windows_subsystem = "windows", so without this a
+    // console window flashes every 5 seconds while LoL is closed.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output().ok()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let port: u16 = extract_arg(&stdout, "--app-port=")?.parse().ok()?;
@@ -304,6 +324,22 @@ fn parse_queue_mode(data: &serde_json::Value) -> Option<QueueModeInfo> {
     })
 }
 
+/// One client for the whole process: rebuilding it per request repeats the TLS
+/// setup on the latency-critical lock path, and the config never varies.
+static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+
+fn http() -> &'static reqwest::Client {
+    HTTP.get_or_init(|| {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            // Without this a stalled LCU hangs a pick forever: the hover PATCH
+            // never returns, the lock never runs, and nothing is ever logged.
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .expect("failed to build HTTP client")
+    })
+}
+
 /// Make an HTTP request to the LCU API
 pub async fn lcu_request(
     creds: &LcuCredentials,
@@ -311,10 +347,7 @@ pub async fn lcu_request(
     path: &str,
     body: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = http();
 
     let mut req = match method {
         "POST" => client.post(creds.url(path)),

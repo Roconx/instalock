@@ -94,7 +94,17 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     let room_for_send = room_arc.clone();
     let send_task = tokio::spawn(async move {
         let _ = room_for_send; // keep alive
-        while let Ok(msg) = rx.recv().await {
+        // Lagged means this client fell behind, not that the stream ended -
+        // returning here would silently stop relaying for the rest of the game.
+        loop {
+            let msg = match rx.recv().await {
+                Ok(msg) => msg,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    eprintln!("client lagged, {} messages dropped", n);
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
             if ws_tx.send(Message::Text(msg.into())).await.is_err() {
                 break;
             }

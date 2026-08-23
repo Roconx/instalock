@@ -10,3 +10,8 @@ src-tauri/gen/schemas/
 # OS
 .DS_Store
 Thumbs.db
+
+# Stale trees the remote build script has created by copying at the wrong depth
+/src/src/
+/src-tauri/src/src/
+/src-tauri/src-tauri/

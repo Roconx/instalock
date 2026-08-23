@@ -33,21 +33,15 @@ function timerKey(enemyIdx, spellIdx) {
   return `${enemyIdx}-${spellIdx}`;
 }
 
-function startTimer(enemyIdx, spellIdx, cooldownSecs, startedAt) {
+// Bind a deadline to the spell node that currently represents it. Kept separate
+// from startTimer so a re-render can re-attach timers that are still running.
+function attachTimer(enemyIdx, spellIdx, endTime) {
   const key = timerKey(enemyIdx, spellIdx);
 
-  // Cancel existing timer if any
   if (timers[key]) {
     clearInterval(timers[key].intervalId);
+    delete timers[key];
   }
-
-  const now = Math.floor(Date.now() / 1000);
-  const elapsed = startedAt ? now - startedAt : 0;
-  const remaining = Math.max(0, cooldownSecs - elapsed);
-
-  if (remaining <= 0) return;
-
-  const endTime = Date.now() + remaining * 1000;
 
   const spellEl = document.querySelector(`[data-enemy="${enemyIdx}"][data-spell="${spellIdx}"]`);
   if (!spellEl) return;
@@ -55,12 +49,16 @@ function startTimer(enemyIdx, spellIdx, cooldownSecs, startedAt) {
   spellEl.classList.add("on-cooldown");
   const timerEl = spellEl.querySelector(".spell-timer");
 
+  let intervalId = null;
+
   function update() {
     const left = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
     timerEl.textContent = formatTime(left);
     if (left <= 0) {
-      clearInterval(timers[key].intervalId);
-      delete timers[key];
+      clearInterval(intervalId);
+      // Only drop the entry if it is still ours - a re-render may have
+      // replaced it with a fresh interval for the same slot.
+      if (timers[key] && timers[key].intervalId === intervalId) delete timers[key];
       spellEl.classList.remove("on-cooldown");
       spellEl.classList.add("flash-ready");
       setTimeout(() => spellEl.classList.remove("flash-ready"), 600);
@@ -68,9 +66,21 @@ function startTimer(enemyIdx, spellIdx, cooldownSecs, startedAt) {
     }
   }
 
-  const intervalId = setInterval(update, 1000);
+  intervalId = setInterval(update, 1000);
   timers[key] = { endTime, intervalId };
   update();
+}
+
+function startTimer(enemyIdx, spellIdx, cooldownSecs, startedAt) {
+  const now = Math.floor(Date.now() / 1000);
+  const elapsed = startedAt ? now - startedAt : 0;
+  // startedAt is the sender's wall clock. Clamp both ways so a peer with a
+  // skewed clock can't show a cooldown longer than the real one.
+  const remaining = Math.min(cooldownSecs, Math.max(0, cooldownSecs - elapsed));
+
+  if (remaining <= 0) return;
+
+  attachTimer(enemyIdx, spellIdx, Date.now() + remaining * 1000);
 }
 
 function cancelTimer(enemyIdx, spellIdx) {
@@ -87,6 +97,17 @@ function cancelTimer(enemyIdx, spellIdx) {
 }
 
 function renderEnemies(enemies) {
+  // Wiping the DOM detaches the nodes the running intervals write into, so the
+  // countdowns would keep ticking invisibly and the next click would read them
+  // as active and cancel instead of start. Take the deadlines, drop the
+  // intervals, and re-attach below once the new nodes exist.
+  const running = {};
+  for (const [key, t] of Object.entries(timers)) {
+    clearInterval(t.intervalId);
+    if (t.endTime > Date.now()) running[key] = t.endTime;
+  }
+  timers = {};
+
   enemiesEl.innerHTML = "";
 
   if (!enemies || enemies.length === 0) {
@@ -205,6 +226,11 @@ function renderEnemies(enemies) {
     row.appendChild(spellsDiv);
     enemiesEl.appendChild(row);
   });
+
+  for (const [key, endTime] of Object.entries(running)) {
+    const [enemyIdx, spellIdx] = key.split("-").map(Number);
+    attachTimer(enemyIdx, spellIdx, endTime);
+  }
 }
 
 let currentEnemies = [];
@@ -214,21 +240,28 @@ dragHandle.addEventListener("mousedown", () => {
   getCurrentWindow().startDragging();
 });
 
-// Save position on window move
-let moveTimeout = null;
+// Shift is polled globally, so overlay-interactive fires on every Shift press
+// anywhere in the OS - and League is played on Shift. Only write when the
+// overlay has actually moved, otherwise this rewrites settings.json hundreds of
+// times per game.
+let lastSavedPos = null;
 async function savePosition() {
   const pos = await getCurrentWindow().outerPosition();
-  await invoke("save_overlay_position", {
-    x: pos.x,
-    y: pos.y,
-  });
+  if (lastSavedPos && lastSavedPos.x === pos.x && lastSavedPos.y === pos.y) return;
+  lastSavedPos = { x: pos.x, y: pos.y };
+  await invoke("save_overlay_position", { x: pos.x, y: pos.y });
 }
 
 // Listen for events from backend
 async function init() {
   // Load settings for opacity
   const settings = await invoke("get_settings");
-  overlayEl.style.setProperty("--opacity", settings.overlayOpacity || 0.8);
+  overlayEl.style.setProperty("--opacity", settings.overlayOpacity ?? 0.8);
+
+  try {
+    const pos = await getCurrentWindow().outerPosition();
+    lastSavedPos = { x: pos.x, y: pos.y };
+  } catch { /* position stays unseeded; first save just writes once */ }
 
   // Listen for opacity changes
   await listen("overlay-opacity", (event) => {
