@@ -128,7 +128,9 @@ body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px;
+  /* Tight on purpose: the window is a fixed 580px and the main view has to
+     hold four cards without scrolling in its resting state. */
+  padding: 10px;
   display: flex;
   flex-direction: column;
 }
@@ -154,7 +156,7 @@ body {
 main {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 7px;
 }
 
 .card {
@@ -172,7 +174,8 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  gap: 8px;
+  padding: 6px 12px;
 }
 
 .card-header-right {
@@ -188,10 +191,10 @@ main {
 }
 
 .card-body {
-  padding: 0 16px 14px;
+  padding: 0 12px 9px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   transition: opacity 0.2s;
 }
 
@@ -204,8 +207,8 @@ main {
 
 .toggle {
   position: relative;
-  width: 44px;
-  height: 24px;
+  width: 38px;
+  height: 21px;
   flex-shrink: 0;
 }
 
@@ -227,8 +230,8 @@ main {
 .slider::before {
   content: '';
   position: absolute;
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   left: 3px;
   bottom: 3px;
   background: var(--knob-off);
@@ -241,7 +244,7 @@ main {
 }
 
 .toggle input:checked + .slider::before {
-  transform: translateX(20px);
+  transform: translateX(17px);
   background: #fff;
 }
 
@@ -257,7 +260,7 @@ main {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 9px 7px 7px;
+  padding: 4px 8px 4px 4px;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -273,8 +276,8 @@ main {
 }
 
 .champ-avatar {
-  width: 30px;
-  height: 30px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--bg-elevated) center/cover no-repeat;
@@ -289,7 +292,7 @@ main {
   padding: 0;
   color: var(--text-primary);
   font-family: var(--font);
-  font-size: var(--fs-normal);
+  font-size: var(--fs-medium);
   outline: none;
 }
 
@@ -460,35 +463,25 @@ main {
   flex-shrink: 0;
 }
 
-/* ── Bravery toggle ── */
+/* ── Modes with no champion select ──
+   ARAM and its variants hand out champions from the bench, so both cards are
+   for a phase that will never happen. Driven by a flag the backend derives from
+   the client map id, not by a mode name: the codenames rotate every patch
+   (ARAM, KIWI, KIWI_JADE...) and Arena, which does have bans, used to get
+   caught by a name-based rule. */
 
-.bravery-toggle {
-  display: none;
-  align-items: center;
-  gap: 5px;
+body[data-has-champ-select="false"] .pick-row,
+body[data-has-champ-select="false"] .ban-row { display: none; }
+
+.mode-note {
+  margin: 0;
+  padding: 0 2px;
   font-size: var(--fs-small);
-  color: var(--text-dim);
-  cursor: pointer;
-  transition: color 0.15s;
+  color: var(--text-faint);
+  line-height: 1.4;
 }
 
-.bravery-toggle:hover { color: var(--text-primary); }
-
-.bravery-toggle input {
-  accent-color: var(--accent-strong);
-  width: 13px;
-  height: 13px;
-}
-
-body[data-queue-mode="CHERRY"] .bravery-toggle { display: inline-flex; }
-
-.bravery-toggle input:disabled { opacity: 0.3; cursor: not-allowed; }
-.bravery-toggle:has(input:disabled) { opacity: 0.4; pointer-events: none; }
-
-/* ── ARAM: hide pick/ban ── */
-
-body[data-queue-mode="ARAM"] .pick-row,
-body[data-queue-mode="ARAM"] .ban-row { display: none; }
+.mode-note:empty { display: none; }
 
 /* ── Settings / Appearance lists ── */
 
@@ -546,17 +539,57 @@ body[data-queue-mode="ARAM"] .ban-row { display: none; }
 .settings-item.disabled .settings-item-label { color: var(--text-dim); }
 .settings-item.disabled .settings-item-hint { color: var(--text-dim); }
 
-.settings-item.disabled .slider-control,
-.settings-item.disabled .btn-row {
+.settings-item.disabled .slider-control {
   opacity: 0.4;
   pointer-events: none;
 }
 
+/* Settings rows use the same switch as the cards. Two different controls for
+   one on/off question was the loudest inconsistency left in the window; the
+   geometry is the .toggle above, scaled down to row height. */
 .settings-item input[type="checkbox"] {
-  accent-color: var(--accent-strong);
-  width: 15px;
-  height: 15px;
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
   flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  background: var(--track);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.settings-item input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--knob-off);
+  transition: transform 0.2s, background 0.2s;
+}
+
+.settings-item input[type="checkbox"]:checked {
+  background: var(--accent-strong);
+}
+
+.settings-item input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.settings-item input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.settings-item input[type="checkbox"]:disabled {
+  cursor: not-allowed;
 }
 
 
@@ -591,13 +624,315 @@ body[data-queue-mode="ARAM"] .ban-row { display: none; }
   color: var(--text-on-accent);
 }
 
-/* ── Small buttons (background image picker) ── */
-
-.btn-row {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
+/* Role picker above a champion list. Six buttons have to share the card width,
+   so they flex evenly instead of sizing to their labels. */
+.segmented.roles {
+  width: 100%;
 }
+
+.segmented.roles button {
+  flex: 1;
+  padding: 3px 0;
+  min-width: 0;
+  color: var(--text-faint);
+}
+
+/* A role with champions of its own is marked, so it is obvious at a glance
+   which tabs are configured without clicking through all six. Weight and
+   contrast rather than a dot underneath: the dot read as dirt on the panel and
+   cost the row 3px of height for something only half the tabs used. */
+.segmented.roles button.filled {
+  color: var(--text-muted);
+}
+
+/* The .filled rule above outranks the shared .segmented button states, so both
+   have to be restated at this specificity or a selected tab loses its
+   contrast. */
+.segmented.roles button.active {
+  color: var(--text-on-accent);
+}
+
+.segmented.roles button:hover:not(.active) {
+  color: var(--text-primary);
+}
+
+/* The lane the client actually assigned us this game — the list that is about
+   to be used, whether or not it is the one being edited. */
+.segmented.roles button.assigned {
+  color: var(--accent-strong);
+}
+
+.segmented.roles button.assigned.active {
+  color: var(--text-on-accent);
+}
+
+/* ARAM, Arena, URF and blind pick assign no lane, so there is nothing for six
+   tabs to mean: only the default list can ever apply. */
+body[data-has-positions="false"] .segmented.roles {
+  display: none;
+}
+
+/* ── Champion priority list ── */
+
+.champ-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  /* The window is a fixed 580px and two of these cards have to fit alongside
+     Auto Accept and the queue card, so a long list scrolls inside itself rather
+     than pushing the one below it off the bottom. Deliberately not a whole
+     number of rows: a half-row peeking is what says "there is more". */
+  max-height: 150px;
+  overflow-y: auto;
+  /* Room for the scrollbar, so it never sits on top of the remove buttons. */
+  padding-right: 4px;
+}
+
+/* Same 4px thumb as the panel area, so a scrolling list reads as scrollable
+   instead of looking like it was cut off. */
+.champ-list::-webkit-scrollbar { width: 4px; }
+.champ-list::-webkit-scrollbar-track { background: transparent; }
+.champ-list::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-sm);
+}
+
+.champ-list:empty { display: none; }
+
+.champ-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px 3px 4px;
+  background: var(--bg-sunken);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: grab;
+}
+
+.champ-item:hover { border-color: var(--border); }
+
+/* The row being dragged, and the gap it would land in. */
+.champ-item.dragging { opacity: 0.4; }
+
+.champ-item.drop-before { border-top-color: var(--accent-strong); }
+.champ-item.drop-after { border-bottom-color: var(--accent-strong); }
+
+/* 1 is what actually gets picked; the rest are fallbacks. Also the
+   click-to-promote control, so it needs a full button reset — without one the
+   UA chrome renders it as a white box and inflates every row. */
+.champ-rank {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-faint);
+  font-family: var(--font);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.champ-rank:hover:not(:disabled) {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.champ-rank:disabled { cursor: default; }
+
+.champ-item:first-child .champ-rank { color: var(--accent-strong); }
+
+.champ-item-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bg-elevated) center/cover no-repeat;
+}
+
+.champ-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-small);
+}
+
+/* A name that no longer resolves would silently never be picked, so it reads
+   as broken rather than fine. */
+.champ-item.invalid .champ-item-name { color: var(--danger); }
+
+.champ-item-remove {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.champ-item-remove:hover {
+  background: var(--bg-elevated);
+  color: var(--danger);
+}
+
+/* A spent one-shot, or one parked by hand. It keeps its place in the order —
+   that is the whole reason it is greyed rather than removed. */
+.champ-item.off { opacity: 0.45; }
+.champ-item.off .champ-item-name { text-decoration: line-through; }
+
+/* On loan from the Defecte list. Shown because the backend really will use it,
+   italic because it does not live here and reordering it here would move it in
+   a list the user is not looking at. */
+.champ-item.inherited {
+  background: none;
+  border-style: dashed;
+  border-color: var(--border);
+  cursor: default;
+}
+
+.champ-item.inherited .champ-item-name { font-style: italic; color: var(--text-dim); }
+.champ-item.inherited .champ-rank { cursor: default; }
+
+.champ-list-note {
+  padding: 2px 2px 0;
+  color: var(--text-faint);
+  font-size: var(--fs-small);
+  line-height: 1.35;
+}
+
+/* ── Entry badges ──
+   Two independent facts about an entry, each a click-toggle: how long it lasts
+   and whether it applies in every mode. Always present, so the state is
+   readable without hovering and settable without a second screen. */
+
+.entry-badge {
+  flex-shrink: 0;
+  height: 17px;
+  padding: 0 5px;
+  display: flex;
+  align-items: center;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-faint);
+  font-family: var(--font);
+  font-size: 9px;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.2px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.entry-badge:hover { color: var(--text-primary); border-color: var(--border-strong); }
+
+.entry-badge.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-strong);
+  color: var(--accent-strong);
+}
+
+/* ── "Add as" pill, inside the champion field ──
+   Asks the once-or-always question where the answer is needed, instead of
+   spending a whole row on it. */
+
+.once-pill {
+  flex-shrink: 0;
+  height: 20px;
+  padding: 0 8px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: var(--fs-small);
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.once-pill:hover { color: var(--text-primary); border-color: var(--border-strong); }
+
+.once-pill.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-strong);
+  color: var(--accent-strong);
+}
+
+/* ── Recently used ── */
+
+.recents[hidden] { display: none; }
+
+.recents {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.recent-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 3px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.recent-chip:hover { border-color: var(--accent-strong); color: var(--text-primary); }
+
+/* Already in the list being edited: nothing to add. */
+.recent-chip:disabled { opacity: 0.35; cursor: default; }
+.recent-chip:disabled:hover { border-color: var(--border); color: var(--text-dim); }
+
+.recent-chip-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-elevated) center/cover no-repeat;
+}
+
+/* ── Card mode label ──
+   Per-mode lists are meant to be invisible, but silently swapping the list out
+   from under the user would be baffling. This is the minimum needed to make it
+   legible: which mode's list is on screen. */
+
+.card-mode {
+  margin-left: 7px;
+  padding: 1px 6px;
+  background: var(--bg-sunken);
+  border-radius: 8px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: var(--fw-light);
+  letter-spacing: 0.2px;
+  vertical-align: middle;
+}
+
+/* ── Small buttons ── */
 
 .btn-sm {
   padding: 5px 12px;
@@ -759,7 +1094,10 @@ body[data-queue-mode="ARAM"] .ban-row { display: none; }
   box-shadow: 0 0 6px var(--accent-glow);
 }
 
+/* Pushed to the right edge now that the log echo is gone, so the statusbar
+   still reads as two anchored ends rather than a huddle on the left. */
 .mode-indicator {
+  margin-left: auto;
   font-size: var(--fs-small);
   font-weight: var(--fw-medium);
   color: var(--accent-strong);
@@ -791,13 +1129,541 @@ body[data-queue-mode="ARAM"] .ban-row { display: none; }
 .sb-launch:disabled { opacity: 0.6; cursor: default; }
 .sb-launch[hidden] { display: none; }
 
-.sb-last {
+/* ── Quiet row controls ──
+   Ten pills across five rows was the loudest thing in the window. A badge that
+   is ON states a fact and stays; a badge that is OFF is only a control, so it
+   waits for the pointer. Opacity rather than display, so nothing reflows. */
+
+.entry-badge:not(.on),
+.champ-item-remove {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.champ-item:hover .entry-badge,
+.champ-item:hover .champ-item-remove,
+.champ-item:focus-within .entry-badge,
+.champ-item:focus-within .champ-item-remove {
+  opacity: 1;
+}
+
+/* ── Settings: a row whose control needs the full width ── */
+
+.settings-item.stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+}
+
+.settings-item.stacked .settings-item-label {
+  margin: 0;
+}
+
+.segmented.wide {
+  width: 100%;
+}
+
+.segmented.wide button {
   flex: 1;
   min-width: 0;
-  text-align: right;
-  color: var(--text-faint);
-  font-family: var(--font-mono);
+}
+
+.settings-item[hidden] {
+  display: none;
+}
+
+.settings-item:has(input:disabled) {
+  opacity: 0.45;
+}
+
+/* ── Partida panel ── */
+
+.game-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.info-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 12px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.info-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.info-title {
+  font-size: var(--fs-small);
+  font-weight: var(--fw-heavy);
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.info-tag {
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Why the client will or won't queue, in one sentence. */
+.info-gate {
+  font-size: var(--fs-small);
+  line-height: 1.4;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.info-gate[hidden] { display: none; }
+.info-gate.good { color: var(--accent-strong); }
+.info-gate.muted { color: var(--text-faint); }
+
+.info-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-small);
+}
+
+.info-row[hidden] { display: none; }
+.info-key { color: var(--text-faint); }
+.info-val { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+.info-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.info-actions[hidden] { display: none; }
+
+.info-actions .btn-sm { flex: 1; }
+
+/* ── Lobby members ── */
+
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: var(--bg-sunken);
+  border-radius: var(--r-sm);
+}
+
+.member-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bg-elevated) center/cover no-repeat;
+}
+
+.member-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.member-name-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.member-name {
+  font-size: var(--fs-medium);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.member-tag {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.member-tag.lead {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.member-detail {
+  font-size: var(--fs-small);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Readiness is a weak signal outside Arena - see the trigger hint in Ajustos -
+   so it is a dot, not a label that would read as a promise. */
+.member-ready {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--track);
+}
+
+.member-ready.on { background: var(--accent-strong); }
+
+/* ── Champ select teams ── */
+
+.team-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.team-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.team-label {
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+}
+
+.team-bans {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.bans-label {
+  font-size: var(--fs-small);
+  color: var(--text-faint);
+  margin-right: 2px;
+}
+
+/* Banned, so shown drained of colour rather than as another pick. */
+.ban-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated) center/cover no-repeat;
+  filter: grayscale(1);
+  opacity: 0.7;
+}
+
+.cell-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cell {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 6px;
+  background: var(--bg-sunken);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+}
+
+.cell.me { border-color: var(--accent); }
+
+.cell-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bg-elevated) center/cover no-repeat;
+}
+
+/* A hover is an intent, not a fact. */
+.cell-icon.hovering { opacity: 0.55; }
+
+.cell-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-medium);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-name.pending { color: var(--text-faint); }
+
+.cell-role {
+  flex-shrink: 0;
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+}
+
+.cell-tag {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+/* ── Last decision ──
+   What the lists actually did, and what they walked past to get there. */
+
+.decision {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.decision-chosen {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 6px;
+  background: var(--accent-soft);
+  border-radius: var(--r-sm);
+}
+
+.decision-chosen .cell-name { color: var(--accent-strong); }
+
+.decision-none {
+  margin: 0;
+  font-size: var(--fs-small);
+  color: var(--warning);
+}
+
+.decision-skip {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 6px;
+  font-size: var(--fs-small);
+}
+
+.decision-skip-name {
+  color: var(--text-dim);
+  text-decoration: line-through;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decision-skip-why {
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+/* ── Auto queue, inside the Principal card ──
+   Every control is here rather than in Ajustos: the switch only matters when
+   you are the leader of an open lobby, and that is the moment this card
+   appears. Collapsed while off, so the resting state is one line. */
+
+.queue-config {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.queue-config[hidden] { display: none; }
+
+.queue-hint {
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: 1.35;
+  color: var(--text-faint);
+}
+
+.queue-hint[hidden] { display: none; }
+
+/* Both numbers on one line. A slider each meant a label row, a track and a
+   readout - three rows of chrome for two single-digit values. */
+/* A hairline above, so the two numbers read as settings of the trigger rather
+   than as a fourth row of controls competing with it. */
+.queue-numbers {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 22px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.queue-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.queue-field[hidden] { display: none; }
+
+/* Pinned right whatever else is on the row. "Mínim" only exists for one of the
+   three triggers, and without this the delay control jumped left every time it
+   appeared or went away. */
+.queue-field.end { margin-left: auto; }
+
+.queue-field-label {
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+}
+
+/* A five-way choice, as five buttons. */
+.segmented.mini {
+  gap: 1px;
+  padding: 1px;
+}
+
+.segmented.mini button {
+  min-width: 20px;
+  padding: 2px 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  background: var(--bg-sunken);
+  border-radius: var(--r-sm);
+}
+
+.stepper button {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: var(--fs-medium);
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.stepper button:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.stepper-value {
+  min-width: 30px;
+  text-align: center;
+  font-size: var(--fs-small);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Help behind a "?": the explanation is read once and then only takes room. */
+.help-btn {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: var(--fs-small);
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.help-btn:hover { color: var(--text-primary); border-color: var(--border-strong); }
+
+.help-btn.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-strong);
+  color: var(--accent-strong);
+}
+
+/* The one list entry with no portrait: Bravery is a mode, not a champion. Its
+   mark is the client's own art, painted as a background like every other icon;
+   the tint only shows through while that image loads. */
+.is-bravery {
+  background-color: var(--accent-soft);
+}
+
+/* ── Card legend ──
+   Behind the "?" in the card header. Everything explanatory in this window
+   works this way: read once, then out of the way rather than parked on screen
+   forever taking two lines off a 580px window.
+
+   A term and its meaning in two columns, not sentences: as prose every line
+   wrapped and the whole thing read like a paragraph to parse. */
+
+.card-help {
+  padding: 7px 9px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+}
+
+.card-help[hidden] { display: none; }
+
+.card-help-lead {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.card-help dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+}
+
+.card-help dt { justify-self: start; }
+.card-help dd { margin: 0; line-height: 1.25; }
+.card-help em { color: var(--text-muted); }
+
+/* The same shape as the real badge, so the legend points at something the eye
+   can find in the list below it. */
+.legend-badge {
+  display: inline-block;
+  min-width: 26px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  text-align: center;
 }

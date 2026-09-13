@@ -1,3 +1,18 @@
 [workspace]
 members = ["src-tauri", "instalock-server", "instalock-shared"]
 resolver = "2"
+
+# The Tauri template ships these and this workspace never had them, so every
+# release so far has been a default-release build: no LTO, 16 codegen units,
+# full debug symbols in the shipped binary. Profiles only apply from the
+# workspace root, which is why they live here rather than in src-tauri.
+#
+# `panic = "abort"` is deliberate: nothing in the app catches a panic, and the
+# unwinding tables are pure size. It does mean a panicking thread takes the
+# process with it instead of leaving a half-dead app behind.
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
+panic = "abort"
+strip = true

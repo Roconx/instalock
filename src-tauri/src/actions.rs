@@ -11,20 +11,58 @@ pub async fn accept_match(creds: &LcuCredentials) -> Result<(), String> {
     Ok(())
 }
 
+/// Start matchmaking for the current lobby. No body; 204 on success.
+///
+/// Deliberately the `lol-lobby` route and not `POST /lol-matchmaking/v1/search`:
+/// the latter returns 500 for every TeamBuilder-managed queue, which is ARAM,
+/// Arena, Swiftplay and more. This one works for all of them.
+///
+/// The response is not the source of truth — the search is confirmed by
+/// `searchState` turning to "Searching", or by the gameflow phase moving on.
+pub async fn start_matchmaking(creds: &LcuCredentials) -> Result<(), String> {
+    lcu_request(
+        creds,
+        "POST",
+        "/lol-lobby/v2/lobby/matchmaking/search",
+        None,
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn cancel_matchmaking(creds: &LcuCredentials) -> Result<(), String> {
+    lcu_request(
+        creds,
+        "DELETE",
+        "/lol-lobby/v2/lobby/matchmaking/search",
+        None,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Commit a pick outright, with no hover step.
+///
+/// This is what "hover abans de lockejar" being off has to mean. It used to go
+/// through `hover_and_lock` anyway, which both defeated the setting and added
+/// HOVER_LOCK_GAP on top of a delay that had already been clamped against the
+/// phase timer - so the clamp was 300 ms short of the guarantee it claimed.
 pub async fn pick_champion(
     creds: &LcuCredentials,
     action_id: i64,
     champion_id: i32,
 ) -> Result<(), String> {
-    hover_and_lock(creds, action_id, champion_id, HOVER_LOCK_GAP).await
+    lock_champion(creds, action_id, champion_id).await
 }
 
+/// Bans are committed in one PATCH: there is nothing for a ban hover to tell
+/// anyone, and the extra round trip only eats into the phase timer.
 pub async fn ban_champion(
     creds: &LcuCredentials,
     action_id: i64,
     champion_id: i32,
 ) -> Result<(), String> {
-    hover_and_lock(creds, action_id, champion_id, HOVER_LOCK_GAP).await
+    lock_champion(creds, action_id, champion_id).await
 }
 
 /// Arena Bravery: a single PATCH with the sentinel championId -3 and
@@ -68,24 +106,3 @@ pub async fn lock_champion(
     Ok(())
 }
 
-/// Hover then commit, waiting `gap` in between (never less than
-/// `HOVER_LOCK_GAP`). A failed hover is not fatal — the lock PATCH carries the
-/// championId anyway — so we log it and still try to commit.
-pub async fn hover_and_lock(
-    creds: &LcuCredentials,
-    action_id: i64,
-    champion_id: i32,
-    gap: Duration,
-) -> Result<(), String> {
-    if let Err(e) = hover_champion(creds, action_id, champion_id).await {
-        log::warn!(
-            "hover failed (action {}, champion {}): {} - continuing to lock",
-            action_id,
-            champion_id,
-            e
-        );
-    }
-    tokio::time::sleep(gap.max(HOVER_LOCK_GAP)).await;
-    lock_champion(creds, action_id, champion_id).await?;
-    Ok(())
-}

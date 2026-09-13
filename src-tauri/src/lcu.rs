@@ -10,6 +10,10 @@ use tokio_tungstenite::tungstenite::Message;
 pub struct QueueModeInfo {
     pub game_mode: String,
     pub queue_id: i64,
+    /// The map, which is the stable half of this pair. Mode codenames are
+    /// rotated every patch (CLASSIC, JADE, KIWI, BRAWL...), but map 12 has been
+    /// the Howling Abyss for as long as ARAM has existed.
+    pub map_id: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -18,8 +22,20 @@ pub enum LcuEvent {
     Disconnected,
     ReadyCheck(serde_json::Value),
     ChampSelect(serde_json::Value),
+    /// Champ select ended (the session resource was deleted).
+    ChampSelectEnded,
     GameflowPhase(String),
-    QueueMode(Option<QueueModeInfo>),
+    /// The whole lobby resource. `None` is the Delete event, which arrives with
+    /// a null payload — hence the Option rather than an empty object.
+    Lobby(Option<serde_json::Value>),
+    /// Matchmaking search state: queue times, and why a queue start was refused.
+    Search(Option<serde_json::Value>),
+    /// Champions the server will let us pick / ban right now. Ownership, free
+    /// rotation and queue restrictions are already applied by the client.
+    PickableChampions(Vec<i32>),
+    BannableChampions(Vec<i32>),
+    /// One champion's live grid entry: hovered, banned, taken.
+    GridChampion(serde_json::Value),
 }
 
 #[derive(Clone)]
@@ -72,13 +88,40 @@ impl LcuMonitor {
         let credentials = self.credentials.clone();
 
         tokio::spawn(async move {
+            // The drive scan is a handful of failed file reads, so it can run
+            // every cycle — it is also what finds the client in the normal case,
+            // and polling it every 5s is what makes InstaLock notice League
+            // starting almost immediately.
+            //
+            // The PowerShell fallback is a different animal: it spawns a process
+            // (~100 ms, ~30 MB) and used to do so every 5 seconds for as long as
+            // League was closed — all day, on a machine with autostart on. It
+            // only matters for installs the scan cannot see, so it gets probed
+            // on the first try and then exponentially less often.
+            let mut probes_until_process_scan: u32 = 0;
+            let mut process_scan_gap: u32 = 1;
+
             while running.load(Ordering::SeqCst) {
-                // find_lockfile does blocking file reads and spawns a process.
-                let found = tokio::task::spawn_blocking(find_lockfile)
+                let scan_processes = probes_until_process_scan == 0;
+                if scan_processes {
+                    probes_until_process_scan = process_scan_gap;
+                    // 5s cycle, so the ceiling is roughly one probe every 5 min.
+                    process_scan_gap = (process_scan_gap * 2).min(60);
+                } else {
+                    probes_until_process_scan -= 1;
+                }
+
+                // Blocking file reads, and sometimes a process spawn.
+                let found = tokio::task::spawn_blocking(move || find_lockfile(scan_processes))
                     .await
                     .unwrap_or(None);
 
                 if let Some(creds) = found {
+                    // Back to eager probing: whatever ends this session, the
+                    // next search should be as quick as the first one was.
+                    probes_until_process_scan = 0;
+                    process_scan_gap = 1;
+
                     if let Err(e) =
                         run_session(&creds, &event_tx, &running, &connected, &credentials).await
                     {
@@ -98,7 +141,11 @@ impl LcuMonitor {
     }
 }
 
-fn find_lockfile() -> Option<LcuCredentials> {
+/// Locate the running client's credentials.
+///
+/// `scan_processes` gates the expensive fallback; see the caller for why it is
+/// not run on every cycle.
+fn find_lockfile(scan_processes: bool) -> Option<LcuCredentials> {
     // Common install roots, tried across every fixed drive rather than just C:
     // and D: — a LoL install on E: used to mean a permanent "Desconnectat".
     const SUFFIXES: [&str; 3] = [
@@ -119,7 +166,11 @@ fn find_lockfile() -> Option<LcuCredentials> {
         }
     }
 
-    find_lockfile_from_process()
+    if scan_processes {
+        find_lockfile_from_process()
+    } else {
+        None
+    }
 }
 
 /// Fallback: read the port and token straight off the running client's command
@@ -203,10 +254,13 @@ async fn run_session(
     connected.store(true, Ordering::SeqCst);
     let _ = event_tx.send(LcuEvent::Connected);
 
-    // Fire an initial queue-mode snapshot so the UI reflects any lobby that
-    // was already open when the app started (otherwise we'd wait for a WS
-    // update that may never come).
+    // Fire an initial snapshot of everything that only pushes on change, so a
+    // client that was already sitting in a lobby or a queue is reflected
+    // immediately rather than after a WS update that may never come.
     let _ = event_tx.send(fetch_initial_lobby(creds).await);
+    if let Ok(data) = lcu_request(creds, "GET", "/lol-matchmaking/v1/search", None).await {
+        let _ = event_tx.send(LcuEvent::Search(Some(data)));
+    }
 
     // Fire an initial gameflow phase snapshot so the overlay opens if already in-game
     if let Ok(data) = lcu_request(creds, "GET", "/lol-gameflow/v1/gameflow-phase", None).await {
@@ -255,10 +309,13 @@ async fn run_session(
 
 async fn fetch_initial_lobby(creds: &LcuCredentials) -> LcuEvent {
     match lcu_request(creds, "GET", "/lol-lobby/v2/lobby", None).await {
-        Ok(data) => LcuEvent::QueueMode(parse_queue_mode(&data)),
-        // 404 => no lobby open yet. Any other error is also treated as "no info"
-        // so we don't crash startup if the client is in a weird state.
-        Err(_) => LcuEvent::QueueMode(None),
+        // The whole resource, not just the mode: this used to send the mode
+        // alone, so starting the app with a lobby already open left the typed
+        // snapshot empty and auto queue reported "no lobby" over an open one.
+        Ok(data) => LcuEvent::Lobby(Some(data)),
+        // 404 => no lobby open yet. Any other error is also treated as "no
+        // lobby" so a client in a strange state cannot break startup.
+        Err(_) => LcuEvent::Lobby(None),
     }
 }
 
@@ -287,12 +344,18 @@ fn parse_lcu_message(text: &str, event_tx: &broadcast::Sender<LcuEvent>) {
         .cloned()
         .unwrap_or(serde_json::Value::Null);
 
+    let deleted = event_type == "Delete";
+
     match uri {
         "/lol-matchmaking/v1/ready-check" => {
             let _ = event_tx.send(LcuEvent::ReadyCheck(data));
         }
         "/lol-champ-select/v1/session" => {
-            let _ = event_tx.send(LcuEvent::ChampSelect(data));
+            if deleted {
+                let _ = event_tx.send(LcuEvent::ChampSelectEnded);
+            } else {
+                let _ = event_tx.send(LcuEvent::ChampSelect(data));
+            }
         }
         "/lol-gameflow/v1/gameflow-phase" => {
             if let Some(phase) = data.as_str() {
@@ -300,44 +363,52 @@ fn parse_lcu_message(text: &str, event_tx: &broadcast::Sender<LcuEvent>) {
             }
         }
         "/lol-lobby/v2/lobby" => {
-            let info = if event_type == "Delete" {
-                None
+            // The whole resource goes through as one event, resolved from the
+            // typed snapshot downstream.
+            //
+            // The `gameConfig` guard is load-bearing. The client also pushes
+            // partial lobby payloads, and because every field of `Lobby` is
+            // `#[serde(default)]` one of those parses *successfully* into an
+            // empty lobby - no mode, no leader, capacity 0 - which then
+            // overwrites a perfectly good snapshot. That is what made an Arena
+            // lobby report itself as Summoner's Rift and auto queue claim you
+            // were not the leader of your own lobby.
+            if deleted {
+                let _ = event_tx.send(LcuEvent::Lobby(None));
+            } else if data.get("gameConfig").is_some() {
+                let _ = event_tx.send(LcuEvent::Lobby(Some(data)));
+            }
+        }
+        "/lol-matchmaking/v1/search" => {
+            let _ = event_tx.send(LcuEvent::Search(if deleted { None } else { Some(data) }));
+        }
+        "/lol-champ-select/v1/pickable-champion-ids" => {
+            let _ = event_tx.send(LcuEvent::PickableChampions(if deleted {
+                Vec::new()
             } else {
-                parse_queue_mode(&data)
-            };
-            let _ = event_tx.send(LcuEvent::QueueMode(info));
+                champion_ids(&data)
+            }));
+        }
+        "/lol-champ-select/v1/bannable-champion-ids" => {
+            let _ = event_tx.send(LcuEvent::BannableChampions(if deleted {
+                Vec::new()
+            } else {
+                champion_ids(&data)
+            }));
+        }
+        // Per-champion push: /lol-champ-select/v1/grid-champions/{id}
+        uri if uri.starts_with("/lol-champ-select/v1/grid-champions/") && !deleted => {
+            let _ = event_tx.send(LcuEvent::GridChampion(data));
         }
         _ => {}
     }
 }
 
-fn parse_queue_mode(data: &serde_json::Value) -> Option<QueueModeInfo> {
-    let game_mode = data
-        .get("gameConfig")?
-        .get("gameMode")?
-        .as_str()?
-        .to_string();
-    let queue_id = data.get("gameConfig")?.get("queueId")?.as_i64()?;
-    Some(QueueModeInfo {
-        game_mode,
-        queue_id,
-    })
-}
-
-/// One client for the whole process: rebuilding it per request repeats the TLS
-/// setup on the latency-critical lock path, and the config never varies.
-static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-
-fn http() -> &'static reqwest::Client {
-    HTTP.get_or_init(|| {
-        reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            // Without this a stalled LCU hangs a pick forever: the hover PATCH
-            // never returns, the lock never runs, and nothing is ever logged.
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .expect("failed to build HTTP client")
-    })
+/// These resources are bare JSON arrays of ints, not wrapper objects.
+fn champion_ids(data: &serde_json::Value) -> Vec<i32> {
+    data.as_array()
+        .map(|ids| ids.iter().filter_map(|v| v.as_i64()).map(|v| v as i32).collect())
+        .unwrap_or_default()
 }
 
 /// Make an HTTP request to the LCU API
@@ -347,7 +418,7 @@ pub async fn lcu_request(
     path: &str,
     body: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let client = http();
+    let client = crate::http::local();
 
     let mut req = match method {
         "POST" => client.post(creds.url(path)),
@@ -376,4 +447,42 @@ pub async fn lcu_request(
     } else {
         Ok(serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_a_real_lockfile() {
+        let creds = parse_lockfile("LeagueClient:24940:54321:mySecretToken:https").unwrap();
+        assert_eq!(creds.port, 54321);
+        assert_eq!(creds.password, "mySecretToken");
+    }
+
+    #[test]
+    fn rejects_a_truncated_lockfile() {
+        assert!(parse_lockfile("LeagueClient:24940:54321").is_none());
+        assert!(parse_lockfile("").is_none());
+    }
+
+    /// The client's command line is one long quoted blob; each flag has to stop
+    /// at whitespace or the next quote, not run into its neighbour.
+    #[test]
+    fn extracts_flags_from_a_command_line() {
+        let cmd = r#""LeagueClientUx.exe" --app-port=54321 --remoting-auth-token=abc-DEF_123 --install-directory=C:\LoL"#;
+        assert_eq!(extract_arg(cmd, "--app-port=").as_deref(), Some("54321"));
+        assert_eq!(
+            extract_arg(cmd, "--remoting-auth-token=").as_deref(),
+            Some("abc-DEF_123")
+        );
+        assert_eq!(extract_arg(cmd, "--nonexistent=").as_deref(), None);
+    }
+
+    #[test]
+    fn extracts_a_flag_that_ends_at_a_quote() {
+        let cmd = "--remoting-auth-token=tok3n\" --app-port=1234";
+        assert_eq!(extract_arg(cmd, "--remoting-auth-token=").as_deref(), Some("tok3n"));
+    }
+
 }

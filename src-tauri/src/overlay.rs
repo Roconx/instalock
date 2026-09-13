@@ -2,7 +2,7 @@ use instalock_shared::{SPELLS, COSMIC_INSIGHT_ID, UNSEALED_SPELLBOOK_ID};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 const CD_BASE: &str = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/";
 
@@ -38,22 +38,27 @@ pub struct SpellRegistry {
 }
 
 impl SpellRegistry {
-    /// Fetch summoner-spells.json from Community Dragon and build the registry
-    pub async fn load() -> Self {
+    /// Fetch summoner-spells.json from Community Dragon and build the registry.
+    ///
+    /// `None` means "ask again later", not "use nothing": the caller is already
+    /// holding the hardcoded fallback and only swaps it for a real answer.
+    pub async fn load() -> Option<Self> {
         let url = format!("{}v1/summoner-spells.json", CD_BASE);
         log::info!("Loading spell data from CDN...");
 
-        let spells: Vec<serde_json::Value> = match reqwest::get(&url).await {
+        // Via the shared CDN client: the bare reqwest::get this replaced had no
+        // timeout at all, and this call used to run before the window existed.
+        let spells: Vec<serde_json::Value> = match crate::http::cdn().get(&url).send().await {
             Ok(resp) => match resp.json().await {
                 Ok(data) => data,
                 Err(e) => {
                     log::error!("Failed to parse summoner-spells.json: {}", e);
-                    return Self::fallback();
+                    return None;
                 }
             },
             Err(e) => {
                 log::error!("Failed to fetch summoner-spells.json: {}", e);
-                return Self::fallback();
+                return None;
             }
         };
 
@@ -79,11 +84,16 @@ impl SpellRegistry {
             });
         }
 
+        if by_id.is_empty() {
+            log::error!("summoner-spells.json parsed to an empty table");
+            return None;
+        }
+
         log::info!("Loaded {} spells from CDN", by_id.len());
         for (id, data) in &by_id {
             log::debug!("Spell {}: {} -> {}", id, data.name, data.icon_url);
         }
-        Self { by_id }
+        Some(Self { by_id })
     }
 
     /// Fallback using hardcoded data from instalock-shared
@@ -158,15 +168,41 @@ impl SpellRegistry {
 pub struct OverlayState {
     pub enemies: Mutex<Vec<EnemyData>>,
     pub game_id: Mutex<Option<String>>,
-    pub spells: SpellRegistry,
+    /// Behind a lock because it starts as the hardcoded fallback and is
+    /// replaced once the CDN answers. See `load_spells`.
+    pub spells: RwLock<SpellRegistry>,
 }
 
 impl OverlayState {
-    pub async fn new() -> Self {
+    /// Synchronous, and deliberately so.
+    ///
+    /// This used to be async and fetch the spell table inline, which meant
+    /// `main` blocked on a CDN request with no timeout before any window
+    /// existed — on a machine whose network wasn't up yet (autostart) the app
+    /// simply didn't appear. Worse, it ran on a `Runtime` that was a temporary,
+    /// dropped at the end of the statement, so anything it spawned died at once.
+    pub fn new() -> Self {
         Self {
             enemies: Mutex::new(Vec::new()),
             game_id: Mutex::new(None),
-            spells: SpellRegistry::load().await,
+            // Cooldowns but no icons: enough to be useful from the first frame.
+            spells: RwLock::new(SpellRegistry::fallback()),
+        }
+    }
+
+    /// Swap the fallback table for the CDN one. Runs on the app's own runtime,
+    /// after the window is up, and retries — the same reasoning as
+    /// `Champions::load_with_retry`.
+    pub async fn load_spells(&self) {
+        let mut delay = 2;
+        loop {
+            if let Some(loaded) = SpellRegistry::load().await {
+                *self.spells.write().await = loaded;
+                return;
+            }
+            log::warn!("Spell table unavailable, retrying in {}s", delay);
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+            delay = (delay * 2).min(60);
         }
     }
 }
@@ -237,13 +273,9 @@ pub fn extract_enemies(
 
 /// Poll the Live Client Data API to detect runes and spells for enemies
 pub async fn poll_live_client_runes(overlay_state: Arc<OverlayState>) {
-    let client = match reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return,
-    };
+    // The Live Client Data API is on loopback with a self-signed certificate,
+    // so it shares the local client with the LCU.
+    let client = crate::http::local();
 
     // Retry up to 30 times (game takes ~30s to load)
     for _ in 0..30 {
@@ -291,7 +323,8 @@ pub async fn poll_live_client_runes(overlay_state: Arc<OverlayState>) {
         let enemy_team = if active_team == "ORDER" { "CHAOS" } else { "ORDER" };
 
         let mut enemies = overlay_state.enemies.lock().await;
-        let spells = &overlay_state.spells;
+        let spells = overlay_state.spells.read().await;
+        let spells = &*spells;
 
         let live_enemies: Vec<&serde_json::Value> = all_players
             .iter()
@@ -426,4 +459,90 @@ fn has_rune(player: &serde_json::Value, rune_id: i32) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Champ select and the Live Client Data API spell positions differently
+    /// ("MIDDLE" vs "MID", "UTILITY" vs "SUPPORT"), and both feed this.
+    #[test]
+    fn roles_sort_top_to_support() {
+        let mut roles = ["UTILITY", "TOP", "BOTTOM", "JUNGLE", "MIDDLE"];
+        roles.sort_by_key(|r| role_order(r));
+        assert_eq!(roles, ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]);
+    }
+
+    #[test]
+    fn the_two_apis_spellings_agree() {
+        assert_eq!(role_order("MIDDLE"), role_order("MID"));
+        assert_eq!(role_order("BOTTOM"), role_order("ADC"));
+        assert_eq!(role_order("UTILITY"), role_order("SUPPORT"));
+        // assignedPosition is lowercase in the champ select session.
+        assert_eq!(role_order("jungle"), role_order("JUNGLE"));
+    }
+
+    /// ARAM and blind pick report no position; those sort last rather than
+    /// colliding with TOP at 0.
+    #[test]
+    fn an_unknown_role_sorts_last() {
+        assert!(role_order("") > role_order("UTILITY"));
+        assert!(role_order("NONE") > role_order("UTILITY"));
+    }
+
+    #[test]
+    fn enemies_without_a_champion_are_skipped() {
+        let session = serde_json::json!({
+            "theirTeam": [
+                { "championId": 0,  "spell1Id": 4, "spell2Id": 14, "assignedPosition": "top" },
+                { "championId": 64, "spell1Id": 4, "spell2Id": 11, "assignedPosition": "jungle" },
+                { "championId": -1, "spell1Id": 4, "spell2Id": 3,  "assignedPosition": "utility" },
+            ]
+        });
+        let mut names = HashMap::new();
+        names.insert(64, "Lee Sin".to_string());
+
+        let enemies = extract_enemies(&session, &names, &SpellRegistry::fallback());
+        assert_eq!(enemies.len(), 1);
+        assert_eq!(enemies[0].champion_name, "Lee Sin");
+        assert_eq!(enemies[0].spell2_name, "Smite");
+    }
+
+    #[test]
+    fn enemies_come_back_in_role_order() {
+        let session = serde_json::json!({
+            "theirTeam": [
+                { "championId": 1, "assignedPosition": "utility" },
+                { "championId": 2, "assignedPosition": "top" },
+                { "championId": 3, "assignedPosition": "middle" },
+            ]
+        });
+        let enemies = extract_enemies(&session, &HashMap::new(), &SpellRegistry::fallback());
+        let ids: Vec<i32> = enemies.iter().map(|e| e.champion_id).collect();
+        assert_eq!(ids, vec![2, 3, 1]);
+    }
+
+    /// A session with no enemy team at all (ARAM pre-lock, spectator) must be
+    /// empty, not a panic.
+    #[test]
+    fn a_session_without_an_enemy_team_is_empty() {
+        let enemies = extract_enemies(
+            &serde_json::json!({}),
+            &HashMap::new(),
+            &SpellRegistry::fallback(),
+        );
+        assert!(enemies.is_empty());
+    }
+
+    #[test]
+    fn cosmic_insight_takes_eighteen_seconds_off() {
+        let spells = SpellRegistry::fallback();
+        // Flash: 300s base.
+        assert_eq!(spells.spell_cooldown(4, false), 300);
+        assert_eq!(spells.spell_cooldown(4, true), 282);
+        // An unknown spell falls back to 300 rather than 0, which would render
+        // as a permanently-ready icon.
+        assert_eq!(spells.spell_cooldown(9999, false), 300);
+    }
 }

@@ -34,10 +34,9 @@ impl Champions {
     pub async fn load(&self) {
         let url = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-summary.json";
 
-        let client = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            .build()
-            .unwrap();
+        // The shared CDN client: certificate verification on, and built once
+        // rather than rebuilt on every retry.
+        let client = crate::http::cdn();
 
         match client.get(url).send().await {
             Ok(resp) => match resp.json::<Vec<ChampionEntry>>().await {
@@ -154,8 +153,89 @@ impl Champions {
     }
 }
 
-fn normalize(name: &str) -> String {
+/// Champion-name normalization. Public because settings.rs dedupes list entries
+/// with it, and because `normalize` in src/main.js must stay byte-identical to
+/// this - a name the UI accepts that the backend cannot resolve fails silently
+/// at pick time.
+pub fn normalize(name: &str) -> String {
     name.to_lowercase()
         .replace(['\'', ' ', '.'], "")
         .replace('&', "and")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a table without touching the network.
+    fn table(entries: &[(i32, &str, Option<&str>)]) -> Champions {
+        let champs = Champions::new();
+        {
+            let mut name_to_id = champs.name_to_id.lock().unwrap();
+            let mut id_to_name = champs.id_to_name.lock().unwrap();
+            let mut names = champs.names.lock().unwrap();
+            for (id, name, alias) in entries {
+                names.push(name.to_string());
+                id_to_name.insert(*id, name.to_string());
+                name_to_id.insert(normalize(name), *id);
+                if let Some(alias) = alias {
+                    name_to_id.insert(normalize(alias), *id);
+                }
+            }
+            names.sort();
+        }
+        champs
+    }
+
+    /// These are the exact cases `normalize` in src/main.js has to agree on.
+    /// The two implementations are independent and nothing else checks them.
+    #[test]
+    fn normalize_matches_the_frontend() {
+        assert_eq!(normalize("Kai'Sa"), "kaisa");
+        assert_eq!(normalize("Lee Sin"), "leesin");
+        assert_eq!(normalize("Dr. Mundo"), "drmundo");
+        assert_eq!(normalize("Nunu & Willump"), "nunuandwillump");
+        assert_eq!(normalize("K'Sante"), "ksante");
+        assert_eq!(normalize("Rek'Sai"), "reksai");
+        assert_eq!(normalize(""), "");
+    }
+
+    #[test]
+    fn resolves_an_exact_name_however_it_is_typed() {
+        let champs = table(&[(145, "Kai'Sa", Some("Kaisa"))]);
+        for spelling in ["Kai'Sa", "kaisa", "KAI SA", "kai'sa"] {
+            assert_eq!(champs.resolve_id(spelling), Some(145), "{}", spelling);
+        }
+    }
+
+    #[test]
+    fn resolves_an_unambiguous_prefix() {
+        let champs = table(&[(43, "Karma", None), (30, "Karthus", None)]);
+        assert_eq!(champs.resolve_id("Kart"), Some(30));
+    }
+
+    /// The old fallback returned the first `contains` hit while iterating a
+    /// HashMap, whose order is seeded per process - "Kar" banned Karma on one
+    /// launch and Karthus on the next. Refusing is the fix.
+    #[test]
+    fn refuses_an_ambiguous_prefix_instead_of_guessing() {
+        let champs = table(&[(43, "Karma", None), (30, "Karthus", None)]);
+        assert_eq!(champs.resolve_id("Kar"), None);
+    }
+
+    /// An alias and a display name for the same champion are two keys, not two
+    /// candidates - dedup by id has to happen before the ambiguity check.
+    #[test]
+    fn an_alias_is_not_an_ambiguity() {
+        let champs = table(&[(62, "Wukong", Some("MonkeyKing"))]);
+        assert_eq!(champs.resolve_id("Wuk"), Some(62));
+    }
+
+    #[test]
+    fn empty_and_unknown_resolve_to_nothing() {
+        let champs = table(&[(43, "Karma", None)]);
+        assert_eq!(champs.resolve_id(""), None);
+        assert_eq!(champs.resolve_id("   "), None);
+        assert_eq!(champs.resolve_id("Zyra"), None);
+    }
 }

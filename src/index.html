@@ -17,6 +17,14 @@
             <path d="M9 1.5 L3.5 9 H7.5 L7 14.5 L12.5 7 H8.5 Z"/>
           </svg>
         </button>
+        <button class="tb-tab" data-tab="game" title="Partida">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="5.75" cy="5" r="2.25"/>
+            <path d="M1.75 13.25c0-2.2 1.8-3.6 4-3.6s4 1.4 4 3.6"/>
+            <path d="M11 3.4a2.25 2.25 0 0 1 0 4.2"/>
+            <path d="M12.2 9.9c1.3.5 2.05 1.7 2.05 3.35"/>
+          </svg>
+        </button>
         <button class="tb-tab" data-tab="settings" title="Ajustos">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
             <path d="M2 4.5h3M8 4.5h6M2 8h8M13 8h1M2 11.5h2M7 11.5h7"/>
@@ -79,14 +87,78 @@
             </div>
           </section>
 
+
+          <!-- Only for the lobby leader: nobody else can start a search, so the
+               card would be a control that cannot do anything. Fed by
+               `client-state` like the Partida tab. -->
+          <section class="card queue-card" id="queueCard" hidden>
+            <div class="card-header">
+              <span class="card-title">
+                Cua automàtica
+                <span class="card-mode" id="queueCardMode" hidden></span>
+              </span>
+              <div class="card-header-right">
+                <!-- Every explanation in this window lives behind a "?". -->
+                <button class="help-btn" id="queueHelp" type="button" title="Què fa cada opció" aria-expanded="false">?</button>
+                <label class="toggle">
+                  <input type="checkbox" id="autoQueue">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="card-body">
+              <p class="info-gate" id="queueGateMain"></p>
+              <!-- Outside #queueConfig on purpose: that block is hidden while
+                   the switch is off, and the help used to live inside it, so
+                   the "?" opened something inside a closed box. -->
+              <div class="card-help" id="queueHelpBox" hidden>
+                <dl>
+                  <dt>Sala plena</dt>
+                  <dd>Quan la sala arriba a la seva mida màxima.</dd>
+                  <dt>N membres</dt>
+                  <dd>Quan hi hagi com a mínim el nombre que triïs.</dd>
+                  <dt>Tothom ready</dt>
+                  <dd>Ready de veritat només a l'Arena: als altres modes el client el marca sol a qui pugui encuar.</dd>
+                </dl>
+              </div>
+
+              <!-- Everything about auto queue lives here, where you can see
+                   whether it is about to fire. Collapsed while it is off: four
+                   controls for a switch that is not on is just noise. -->
+              <div class="queue-config" id="queueConfig" hidden>
+                <div class="segmented wide" id="autoQueueTrigger">
+                  <button data-trigger="full">Sala plena</button>
+                  <button data-trigger="members">N membres</button>
+                  <button data-trigger="ready">Tothom ready</button>
+                </div>
+                <!-- Both numbers on one line: a full-width slider each cost
+                     three rows for two values that are one digit long. -->
+                <div class="queue-numbers">
+                  <span class="queue-field" id="autoQueueMinRow" hidden>
+                    <span class="queue-field-label">Mínim</span>
+                    <span class="segmented mini" id="autoQueueMin"></span>
+                  </span>
+                  <span class="queue-field end">
+                    <span class="queue-field-label">Espera</span>
+                    <span class="stepper">
+                      <button type="button" data-step="-0.5" title="Menys">−</button>
+                      <span class="stepper-value" id="autoQueueDelayValue">2s</span>
+                      <button type="button" data-step="0.5" title="Més">+</button>
+                    </span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section class="card pick-row">
             <div class="card-header">
-              <span class="card-title">Auto Pick</span>
+              <span class="card-title">
+                Auto Pick
+                <span class="card-mode" id="pickModeLabel" hidden></span>
+              </span>
               <div class="card-header-right">
-                <label class="bravery-toggle">
-                  <input type="checkbox" id="braveryEnabled">
-                  <span title="Nomes s'aplica a Arena">Bravery (Arena)</span>
-                </label>
+                <button class="help-btn" id="pickHelpBtn" type="button" title="Com funciona la llista" aria-expanded="false">?</button>
                 <label class="toggle">
                   <input type="checkbox" id="autoPick">
                   <span class="slider"></span>
@@ -94,37 +166,174 @@
               </div>
             </div>
             <div class="card-body" data-toggle="autoPick">
+              <!-- A legend, not prose: a term and its meaning, two columns. The
+                   sentences it replaced wrapped to two lines each and read like
+                   a paragraph you had to parse. Behind the "?" either way. -->
+              <div class="card-help" id="pickHelp" hidden>
+                <p class="card-help-lead">S'agafa el primer disponible de la llista.</p>
+                <dl>
+                  <dt><em>Cursiva</em></dt>
+                  <dd>Ve de la llista Defecte</dd>
+                  <dt><span class="legend-badge">∞</span></dt>
+                  <dd>Sempre</dd>
+                  <dt><span class="legend-badge">1×</span></dt>
+                  <dd>Només la propera partida</dd>
+                  <dt><span class="legend-badge">Tot</span></dt>
+                  <dd>A tots els modes de joc</dd>
+                </dl>
+              </div>
+
+
+              <div class="segmented roles" id="pickRoles">
+                <button data-role="default" class="active" title="ARAM, blind, i qualsevol rol sense llista">Defecte</button>
+                <button data-role="top">Top</button>
+                <button data-role="jungle">Jgl</button>
+                <button data-role="middle">Mid</button>
+                <button data-role="bottom">Bot</button>
+                <button data-role="utility">Sup</button>
+              </div>
               <div class="champ-autocomplete" data-picker="pick">
                 <div class="champ-field">
                   <span class="champ-avatar"></span>
-                  <input type="text" id="pickChampion" placeholder="Cerca un champion..." class="champ-input" autocomplete="off" spellcheck="false">
+                  <input type="text" id="pickChampion" placeholder="Afegeix un champion..." class="champ-input" autocomplete="off" spellcheck="false">
+                  <button class="once-pill" id="pickOncePill" type="button" tabindex="-1">Sempre</button>
                   <button class="champ-clear" type="button" tabindex="-1" title="Esborrar">&times;</button>
                 </div>
                 <div class="champ-dropdown" id="pickDropdown"></div>
               </div>
+              <div class="champ-list" id="pickList"></div>
+              <div class="recents" id="pickRecents" hidden></div>
             </div>
           </section>
 
           <section class="card ban-row">
             <div class="card-header">
-              <span class="card-title">Auto Ban</span>
-              <label class="toggle">
-                <input type="checkbox" id="autoBan">
-                <span class="slider"></span>
-              </label>
+              <span class="card-title">
+                Auto Ban
+                <span class="card-mode" id="banModeLabel" hidden></span>
+              </span>
+              <div class="card-header-right">
+                <button class="help-btn" id="banHelpBtn" type="button" title="Com funciona la llista" aria-expanded="false">?</button>
+                <label class="toggle">
+                  <input type="checkbox" id="autoBan">
+                  <span class="slider"></span>
+                </label>
+              </div>
             </div>
             <div class="card-body" data-toggle="autoBan">
+              <!-- A legend, not prose: a term and its meaning, two columns. The
+                   sentences it replaced wrapped to two lines each and read like
+                   a paragraph you had to parse. Behind the "?" either way. -->
+              <div class="card-help" id="banHelp" hidden>
+                <p class="card-help-lead">S'agafa el primer disponible de la llista.</p>
+                <dl>
+                  <dt><em>Cursiva</em></dt>
+                  <dd>Ve de la llista Defecte</dd>
+                  <dt><span class="legend-badge">∞</span></dt>
+                  <dd>Sempre</dd>
+                  <dt><span class="legend-badge">1×</span></dt>
+                  <dd>Només la propera partida</dd>
+                  <dt><span class="legend-badge">Tot</span></dt>
+                  <dd>A tots els modes de joc</dd>
+                </dl>
+              </div>
+
+
+              <div class="segmented roles" id="banRoles">
+                <button data-role="default" class="active" title="ARAM, blind, i qualsevol rol sense llista">Defecte</button>
+                <button data-role="top">Top</button>
+                <button data-role="jungle">Jgl</button>
+                <button data-role="middle">Mid</button>
+                <button data-role="bottom">Bot</button>
+                <button data-role="utility">Sup</button>
+              </div>
               <div class="champ-autocomplete" data-picker="ban">
                 <div class="champ-field">
                   <span class="champ-avatar"></span>
-                  <input type="text" id="banChampion" placeholder="Cerca un champion..." class="champ-input" autocomplete="off" spellcheck="false">
+                  <input type="text" id="banChampion" placeholder="Afegeix un champion..." class="champ-input" autocomplete="off" spellcheck="false">
+                  <button class="once-pill" id="banOncePill" type="button" tabindex="-1">Sempre</button>
                   <button class="champ-clear" type="button" tabindex="-1" title="Esborrar">&times;</button>
                 </div>
                 <div class="champ-dropdown" id="banDropdown"></div>
               </div>
+              <div class="champ-list" id="banList"></div>
+              <div class="recents" id="banRecents" hidden></div>
             </div>
           </section>
+          <!-- Every card below Auto Accept can be hidden by the mode, and a tab
+               with one lonely toggle reads as broken rather than as correct. -->
+          <p class="mode-note" id="modeNote"></p>
         </main>
+      </div>
+
+      <!-- Partida: everything the LCU already tells us and the app used to
+           throw away. Read-only except for the two queue buttons. -->
+      <div id="gameView" class="hidden">
+        <div class="log-empty" id="gameEmpty">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="9" cy="8" r="3.2"/>
+            <path d="M3 19.5c0-3.2 2.7-5.2 6-5.2s6 2 6 5.2"/>
+            <path d="M16.5 5.2a3.2 3.2 0 0 1 0 5.9"/>
+            <path d="M18.3 14.7c1.9.8 3 2.5 3 4.8"/>
+          </svg>
+          <p class="log-empty-title">Res en marxa</p>
+          <p class="log-empty-hint">Obre el client de League i aquí veuràs la sala, la cua i el champion select en directe.</p>
+        </div>
+
+        <div class="game-body hidden" id="gameBody">
+          <section class="info-card">
+            <div class="info-head">
+              <span class="info-title">Estat</span>
+              <span class="info-tag" id="gamePhase">—</span>
+            </div>
+            <p class="info-gate" id="queueGate"></p>
+            <div class="info-row" id="searchRow" hidden>
+              <span class="info-key">A la cua</span>
+              <span class="info-val" id="searchTime">—</span>
+            </div>
+            <div class="info-actions">
+              <button class="btn-sm" id="queueStart" type="button">Buscar partida</button>
+              <button class="btn-sm danger hidden" id="queueCancel" type="button">Cancel·lar</button>
+            </div>
+          </section>
+
+          <section class="info-card hidden" id="lobbyCard">
+            <div class="info-head">
+              <span class="info-title">Sala</span>
+              <span class="info-tag" id="lobbyCount"></span>
+            </div>
+            <div class="member-list" id="lobbyMembers"></div>
+          </section>
+
+          <section class="info-card hidden" id="draftCard">
+            <div class="info-head">
+              <span class="info-title">Champion select</span>
+              <span class="info-tag" id="draftTimer"></span>
+            </div>
+            <div class="team-block">
+              <div class="team-head">
+                <span class="team-label">El teu equip</span>
+                <span class="team-bans" id="myBans"></span>
+              </div>
+              <div class="cell-list" id="myTeam"></div>
+            </div>
+            <div class="team-block">
+              <div class="team-head">
+                <span class="team-label">Enemics</span>
+                <span class="team-bans" id="theirBans"></span>
+              </div>
+              <div class="cell-list" id="theirTeam"></div>
+            </div>
+          </section>
+
+          <section class="info-card hidden" id="decisionCard">
+            <div class="info-head">
+              <span class="info-title">Última decisió</span>
+              <span class="info-tag" id="decisionWhat"></span>
+            </div>
+            <div class="decision" id="decisionBody"></div>
+          </section>
+        </div>
       </div>
 
       <!-- Settings -->
@@ -141,8 +350,25 @@
               <input type="checkbox" id="restoreFocus">
             </label>
             <label class="settings-item">
-              <span class="settings-item-label">Hover champion abans de lockejar</span>
+              <span class="settings-item-label">
+                Hover champion abans de lockejar
+                <span class="settings-item-hint">També declara la intenció durant la fase de planificació</span>
+              </span>
               <input type="checkbox" id="hoverPick">
+            </label>
+            <label class="settings-item">
+              <span class="settings-item-label">
+                Evitar champions que hovereja un aliat
+                <span class="settings-item-hint">Passa al següent de la llista en comptes de disputar-lo</span>
+              </span>
+              <input type="checkbox" id="avoidAllyHover">
+            </label>
+            <label class="settings-item">
+              <span class="settings-item-label">
+                Recordar les llistes per mode de joc
+                <span class="settings-item-hint">El que tries a l'Arena no apareix a SoloQ. Desactivat, una sola llista per a tot.</span>
+              </span>
+              <input type="checkbox" id="perModeLists">
             </label>
             <label class="settings-item">
               <span class="settings-item-label">Minimitzar a la safata en tancar</span>
@@ -298,7 +524,6 @@
       <span class="mode-indicator" id="modeIndicator" hidden>
         <span id="modeName">—</span>
       </span>
-      <span class="sb-last" id="sbLastLog"></span>
     </div>
 
   </div>
